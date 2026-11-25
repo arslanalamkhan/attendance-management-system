@@ -388,3 +388,19 @@ describe('ADMS never answers 500 to the device', () => {
     }
   });
 });
+
+describe('ADMS through nginx (port 80)', () => {
+  it('records the terminal address nginx passes in X-Real-IP (only believed from the VM itself)', async () => {
+    // supertest connects from loopback, exactly like nginx on the VM does
+    const res = await adms.get(`/iclock/cdata?SN=${SN}&options=all`).set('X-Real-IP', '172.20.35.250');
+    expect(res.status).toBe(200);
+    const [dev] = await q<{ ip_address: string | null }>('SELECT ip_address FROM devices WHERE serial_number = $1', [SN]);
+    expect(dev?.ip_address).toBe('172.20.35.250');
+    const [log] = await q<{ remote_ip: string | null }>('SELECT remote_ip FROM adms_requests WHERE serial_number = $1 ORDER BY id DESC LIMIT 1', [SN]);
+    expect(log?.remote_ip).toBe('172.20.35.250');
+    // a malformed header is ignored
+    await adms.get(`/iclock/getrequest?SN=${SN}`).set('X-Real-IP', 'not an address<script>');
+    const [dev2] = await q<{ ip_address: string | null }>('SELECT ip_address FROM devices WHERE serial_number = $1', [SN]);
+    expect(dev2?.ip_address).toMatch(/^(127\.0\.0\.1|::1)$/);
+  });
+});

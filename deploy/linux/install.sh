@@ -239,6 +239,7 @@ if command -v getenforce >/dev/null && [[ $(getenforce) != Disabled ]]; then
   setsebool -P httpd_can_network_connect 1
   restorecon -R /etc/nginx/ssl >/dev/null 2>&1 || true
 fi
+ensure_device_allowlist
 nginx -t
 systemctl enable nginx
 systemctl reload nginx 2>/dev/null || systemctl restart nginx

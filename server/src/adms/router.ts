@@ -19,6 +19,21 @@ const BODY_LOG_MAX = 64 * 1024;
 
 const stripV4Mapped = (a: string | undefined): string | null => (a ? String(a).replace(/^::ffff:/i, '') : null);
 
+/**
+ * The terminal's address. Terminals that cannot reach port 8081 come through nginx on port 80 (/iclock/ is passed
+ * through): then the socket is the VM itself and nginx sends the real address in X-Real-IP. The header is only
+ * believed from loopback, so a terminal talking to 8081 directly cannot fake it.
+ */
+function deviceIp(req: Request): string | null {
+  const direct = stripV4Mapped(req.socket && req.socket.remoteAddress);
+  if (direct === '127.0.0.1' || direct === '::1') {
+    const fwd = req.headers['x-real-ip'];
+    const v = Array.isArray(fwd) ? fwd[0] : fwd;
+    if (v && /^[0-9a-fA-F:.]{2,45}$/.test(v.trim())) return stripV4Mapped(v.trim());
+  }
+  return direct;
+}
+
 /** Always read the body, whatever the Content-Type (devices often send none or odd ones). */
 router.use(express.raw({ type: () => true, limit: '20mb' }));
 
@@ -303,7 +318,7 @@ router.all('*', async (req, res) => {
     method: req.method,
     path: (req.path || '/').toLowerCase().replace(/\.aspx$/, '').replace(/\/+$/, '') || '/',
     sn: null,
-    ip: stripV4Mapped(req.socket && req.socket.remoteAddress),
+    ip: deviceIp(req),
     body: '',
   };
   const qi = req.originalUrl.indexOf('?');
@@ -346,6 +361,6 @@ router.use(async (err: unknown, req: Request, res: express.Response, _next: expr
     query: qi >= 0 ? req.originalUrl.slice(qi + 1) : '',
     body: `[request error: ${err instanceof Error ? err.message : String(err)}]`,
     response: 'OK',
-    ip: stripV4Mapped(req.socket && req.socket.remoteAddress),
+    ip: deviceIp(req),
   });
 });

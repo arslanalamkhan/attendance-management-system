@@ -185,13 +185,65 @@ cmd_update() {
   info "updated to $after"
 }
 
-# The systemd units and this command come from the repository: refresh them on every update.
+# The systemd units, the nginx site and this command come from the repository: refresh them on every update.
 install_units() {
   install -m 0644 "$APP_DIR/deploy/linux/nacta-attendance.service" /etc/systemd/system/
   install -m 0644 "$APP_DIR/deploy/linux/nacta-attendance-backup.service" /etc/systemd/system/
   install -m 0644 "$APP_DIR/deploy/linux/nacta-attendance-backup.timer" /etc/systemd/system/
   install -m 0755 "$APP_DIR/deploy/linux/nacta-attendance" /usr/local/bin/nacta-attendance
   systemctl daemon-reload
+  render_nginx
+}
+
+NGINX_SITE=/etc/nginx/conf.d/nacta-attendance.conf
+DEVICE_ALLOWLIST=/etc/nginx/nacta-attendance-devices.conf
+
+# Terminals allowed to push through nginx on port 80 ("allow <ip>;" lines). Created empty: nobody until added.
+ensure_device_allowlist() {
+  if [[ ! -f $DEVICE_ALLOWLIST ]]; then
+    printf '# Terminals allowed to push attendance through port 80 (sudo nacta-attendance allow-device <ip>).\n' >"$DEVICE_ALLOWLIST"
+    chmod 0644 "$DEVICE_ALLOWLIST"
+  fi
+}
+
+# Re-create the nginx site from the repository template, keeping the server names already in use.
+render_nginx() {
+  [[ -f $NGINX_SITE ]] || return 0 # nginx is set up by install.sh
+  local names
+  names=$(awk '/^[[:space:]]*server_name[[:space:]]/ { sub(/^[[:space:]]*server_name[[:space:]]+/, ""); sub(/;.*/, ""); print; exit }' "$NGINX_SITE")
+  [[ -n $names ]] || die "could not read server_name from $NGINX_SITE"
+  ensure_device_allowlist
+  cp -p "$NGINX_SITE" "$NGINX_SITE.bak"
+  sed "s/__SERVER_NAME__/$names/" "$APP_DIR/deploy/linux/nginx-nacta-attendance.conf" >"$NGINX_SITE"
+  if nginx -t 2>/dev/null; then
+    systemctl reload nginx
+  else
+    mv "$NGINX_SITE.bak" "$NGINX_SITE"
+    nginx -t || true
+    die "the new nginx configuration was rejected; the previous one was kept"
+  fi
+  rm -f "$NGINX_SITE.bak"
+}
+
+cmd_allow_device() {
+  need_root allow-device
+  local ip=${1:-}
+  if [[ -z $ip ]]; then
+    echo "Terminals allowed to push through port 80:"
+    grep -E '^allow ' "$DEVICE_ALLOWLIST" 2>/dev/null | sed 's/^allow /  /; s/;$//' || echo "  (none)"
+    echo "Add one with: sudo nacta-attendance allow-device <ip>"
+    return 0
+  fi
+  [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$ ]] || die "not an IPv4 address: $ip"
+  ensure_device_allowlist
+  if grep -qxF "allow $ip;" "$DEVICE_ALLOWLIST"; then
+    echo "$ip is already allowed"
+  else
+    echo "allow $ip;" >>"$DEVICE_ALLOWLIST"
+    echo "allowed $ip"
+  fi
+  render_nginx
+  echo "On the terminal: Cloud Server Setting > Server $(hostname -I | awk '{print $1}'), Port 80"
 }
 
 build_app() {
@@ -216,6 +268,7 @@ nacta-attendance - NACTA Attendance server administration
   restore <file>               replace the database with a backup file             (sudo)
   migrate                      apply database migrations                           (sudo)
   reset-password <email>       set a temporary password for a locked-out user      (sudo)
+  allow-device [ip]            let a terminal push through port 80 (no ip: list)   (sudo)
 
 Config: $ENV_FILE   Code: $APP_DIR   Service: systemctl status $SERVICE
 EOF
@@ -235,6 +288,7 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
     restore) cmd_restore "$@" ;;
     migrate) cmd_migrate ;;
     reset-password) cmd_reset_password "$@" ;;
+    allow-device) cmd_allow_device "$@" ;;
     help | -h | --help) cmd_help ;;
     *) cmd_help; exit 2 ;;
   esac

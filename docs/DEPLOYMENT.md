@@ -77,6 +77,17 @@ uploads by itself. Do not run the old PC server at the same time.
 
 Check from the VM that the device reaches you: `sudo nacta-attendance logs 50 | grep iclock`.
 
+**If the network blocks port 8081** between the terminals and the VM (common when they are on different subnets),
+let the terminal push through port 80 instead. Allow its address once, then set the terminal's port to `80`:
+
+```bash
+sudo nacta-attendance allow-device 172.20.35.250     # the terminal's IP; run again for each terminal
+sudo nacta-attendance allow-device                   # list the allowed terminals
+```
+
+nginx then passes only `/iclock/` requests from those addresses to the app; everything else on port 80 still
+redirects to HTTPS. The terminal protocol has no password, so keep the list to the terminals' own addresses.
+
 ## 4. Daily administration
 
 ```bash
