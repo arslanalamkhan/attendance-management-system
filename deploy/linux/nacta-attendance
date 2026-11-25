@@ -183,10 +183,12 @@ cmd_update() {
 }
 
 build_app() {
+  # The build tools (TypeScript, tsup, Vite) are devDependencies: npm skips them when NODE_ENV=production is in the
+  # environment (it is, from the env file), so install and build without it.
   info "installing dependencies"
-  (cd "$APP_DIR" && as_app npm ci --no-audit --no-fund)
+  (cd "$APP_DIR" && as_app env -u NODE_ENV npm ci --include=dev --no-audit --no-fund)
   info "building"
-  (cd "$APP_DIR" && as_app npm run build)
+  (cd "$APP_DIR" && as_app env -u NODE_ENV npm run build)
 }
 
 cmd_help() {
