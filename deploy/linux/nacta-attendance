@@ -177,11 +177,21 @@ cmd_update() {
   info "backing up the database before updating ($before -> $after)"
   cmd_backup
   build_app
+  install_units
   systemctl stop "$SERVICE"
   node_script migrate
   systemctl start "$SERVICE"
   wait_healthy
   info "updated to $after"
+}
+
+# The systemd units and this command come from the repository: refresh them on every update.
+install_units() {
+  install -m 0644 "$APP_DIR/deploy/linux/nacta-attendance.service" /etc/systemd/system/
+  install -m 0644 "$APP_DIR/deploy/linux/nacta-attendance-backup.service" /etc/systemd/system/
+  install -m 0644 "$APP_DIR/deploy/linux/nacta-attendance-backup.timer" /etc/systemd/system/
+  install -m 0755 "$APP_DIR/deploy/linux/nacta-attendance" /usr/local/bin/nacta-attendance
+  systemctl daemon-reload
 }
 
 build_app() {
