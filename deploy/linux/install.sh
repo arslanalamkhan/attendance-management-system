@@ -257,13 +257,17 @@ if [[ $SKIP_FIREWALL -eq 0 ]]; then
 fi
 
 # --------------------------------------------------------------------------------------------- done
+# Built outside the here-document: an apostrophe inside ${...} there breaks the expansion.
+WEB_LINE="https://$SERVER_NAME"
+[[ -n $PRIMARY_IP && $PRIMARY_IP != "$SERVER_NAME" ]] && WEB_LINE="$WEB_LINE   (or https://$PRIMARY_IP)"
+DEVICE_IP=${PRIMARY_IP:-"this VM's IP"}
 cat <<EOF
 
 ========================================================================================================
  NACTA Attendance is running.
 
-   Web app:     https://$SERVER_NAME${PRIMARY_IP:+   (or https://$PRIMARY_IP)}
-   Devices:     on each terminal set  Comm. > Cloud Server Setting > Server ${PRIMARY_IP:-<this VM's IP>}, Port $ADMS_PORT
+   Web app:     $WEB_LINE
+   Devices:     on each terminal set  Comm. > Cloud Server Setting > Server $DEVICE_IP, Port $ADMS_PORT
    Admin:       nacta-attendance help
 EOF
 if [[ -z $RESTORE && $FRESH_ENV -eq 1 ]]; then
