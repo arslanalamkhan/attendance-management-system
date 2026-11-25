@@ -2,7 +2,8 @@
 Description=Run the NACTA Attendance database backup every night
 
 [Timer]
-OnCalendar=*-*-* 01:30:00
+# Pakistan time, whatever the VM's own timezone is (often UTC).
+OnCalendar=*-*-* 01:30:00 Asia/Karachi
 RandomizedDelaySec=10min
 Persistent=true
 
