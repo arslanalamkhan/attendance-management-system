@@ -1,0 +1,207 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * NACTA design tokens. Values are space-separated RGB channels so Tailwind can apply alpha.
+ * Semantic colours (success / warning / info / danger) are for status only.
+ */
+@layer base {
+  :root {
+    --radius: 10px;
+
+    --background: 248 250 252;
+    --card: 255 255 255;
+    --popover: 255 255 255;
+    --muted: 241 245 249;
+    --accent: 238 242 247;
+    --foreground: 15 23 42;
+    --muted-foreground: 71 85 105;
+    --border: 226 232 240;
+    --border-strong: 203 213 225;
+    --input: 129 144 165;
+    --ring: 5 150 105;
+
+    --primary: 6 95 70;
+    --primary-foreground: 255 255 255;
+    --primary-hover: 6 78 59;
+    --primary-subtle: 236 253 245;
+    --primary-text: 6 95 70;
+
+    --sidebar: 243 246 249;
+    --sidebar-border: 226 232 240;
+
+    --success: 22 163 74;
+    --success-subtle: 220 252 231;
+    --success-text: 22 101 52;
+    --warning: 217 119 6;
+    --warning-subtle: 254 243 199;
+    --warning-text: 146 64 14;
+    --info: 37 99 235;
+    --info-subtle: 219 234 254;
+    --info-text: 30 64 175;
+    --danger: 185 28 28;
+    --danger-subtle: 254 226 226;
+    --danger-text: 153 27 27;
+    --danger-hover: 153 27 27;
+    --danger-on: 255 255 255;
+
+    --chart-1: 4 120 87;
+    --chart-2: 100 116 139;
+    --chart-3: 37 99 235;
+    --chart-4: 217 119 6;
+    --chart-5: 13 148 136;
+    --chart-grid: 226 232 240;
+
+    --shadow: 15 23 42;
+    --shadow-a1: 0.05;
+    --shadow-a2: 0.07;
+    --shadow-a3: 0.08;
+    --shadow-a4: 0.14;
+
+    color-scheme: light;
+  }
+
+  .dark {
+    --background: 11 18 32;
+    --card: 17 26 43;
+    --popover: 20 31 51;
+    --muted: 26 37 56;
+    --accent: 30 43 66;
+    --foreground: 230 235 243;
+    --muted-foreground: 154 168 189;
+    --border: 36 50 72;
+    --border-strong: 51 68 94;
+    --input: 91 107 132;
+    --ring: 52 211 153;
+
+    --primary: 52 211 153;
+    --primary-foreground: 2 44 34;
+    --primary-hover: 110 231 183;
+    --primary-subtle: 12 42 37;
+    --primary-text: 52 211 153;
+
+    --sidebar: 13 21 37;
+    --sidebar-border: 30 43 66;
+
+    --success: 74 222 128;
+    --success-subtle: 5 46 22;
+    --success-text: 134 239 172;
+    --warning: 251 191 36;
+    --warning-subtle: 58 42 6;
+    --warning-text: 252 211 77;
+    --info: 96 165 250;
+    --info-subtle: 12 33 73;
+    --info-text: 147 197 253;
+    --danger: 248 113 113;
+    --danger-subtle: 59 13 13;
+    --danger-text: 252 165 165;
+    --danger-hover: 252 165 165;
+    --danger-on: 69 10 10;
+
+    --chart-1: 52 211 153;
+    --chart-2: 148 163 184;
+    --chart-3: 96 165 250;
+    --chart-4: 251 191 36;
+    --chart-5: 45 212 191;
+    --chart-grid: 36 50 72;
+
+    --shadow: 0 0 0;
+    --shadow-a1: 0.3;
+    --shadow-a2: 0.35;
+    --shadow-a3: 0.4;
+    --shadow-a4: 0.55;
+
+    color-scheme: dark;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-background font-sans text-sm text-foreground antialiased;
+    font-feature-settings: 'cv11', 'ss03';
+  }
+
+  ::selection {
+    background: rgb(var(--primary) / 0.22);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Slim, calm scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--border-strong)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgb(var(--border-strong));
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .font-figure {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum', 'cv11', 'ss03';
+  }
+}
+
+/* Printing a report: drop the app chrome, let the page flow, keep colours (status chips carry meaning). */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  body * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  aside[aria-label='Sidebar'],
+  body header.sticky {
+    display: none !important;
+  }
+  .h-dvh {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  main#main {
+    overflow: visible !important;
+  }
+  [data-print-region] {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

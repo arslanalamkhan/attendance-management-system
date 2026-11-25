@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.local
+*.tsbuildinfo
+.vite/
+coverage/
+npm-debug.log*
+.DS_Store
+
+# Local data: database dumps, backups and logs (employee data must never be committed)
+.backup/
+logs/
+*.log
+*.dump
+*.dump.enc
+*.sql.gz
+samples/
+
+# Local tool settings
+.claude/

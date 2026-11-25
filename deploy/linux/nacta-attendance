@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# nacta-attendance - day-to-day administration of the NACTA Attendance server.
+# Installed to /usr/local/bin/nacta-attendance by deploy/linux/install.sh. Run "nacta-attendance help".
+set -euo pipefail
+
+APP_DIR=${APP_DIR:-/opt/nacta-attendance}
+ENV_FILE=${ENV_FILE:-/etc/nacta-attendance/attendance.env}
+APP_USER=${APP_USER:-nacta}
+SERVICE=nacta-attendance
+BACKUP_DIR=${BACKUP_DIR:-/var/backups/nacta-attendance}
+
+die() { echo "error: $*" >&2; exit 1; }
+info() { echo "==> $*"; }
+need_root() { [[ $EUID -eq 0 ]] || die "run this with sudo: sudo nacta-attendance $*"; }
+
+# PostgreSQL client tools: PGDG puts them in a versioned folder on RHEL-family systems.
+pg_bin_dir() {
+  local d
+  d=$(ls -d /usr/pgsql-*/bin /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -n 1 || true)
+  [[ -n $d ]] && echo "$d"
+}
+if d=$(pg_bin_dir); then PATH="$d:$PATH"; fi
+
+load_env() {
+  [[ -r $ENV_FILE ]] || die "cannot read $ENV_FILE (run with sudo?)"
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+  : "${DB_NAME:?DB_NAME missing in $ENV_FILE}" "${DB_USER:?DB_USER missing in $ENV_FILE}" "${DB_PASSWORD:?DB_PASSWORD missing in $ENV_FILE}"
+  # libpq reads these, so the password never appears on a command line (visible in ps).
+  export PGHOST=${DB_HOST:-127.0.0.1} PGPORT=${DB_PORT:-5432} PGUSER=$DB_USER PGPASSWORD=$DB_PASSWORD PGDATABASE=$DB_NAME
+  BACKUP_KEEP_DAYS=${BACKUP_KEEP_DAYS:-30}
+}
+
+as_app() { runuser -u "$APP_USER" -- "$@"; }
+# psql as the PostgreSQL superuser over the local socket (peer auth); the app's PG* login is cleared first.
+pg_super() {
+  (cd / && runuser -u postgres -- env -u PGHOST -u PGPORT -u PGUSER -u PGPASSWORD -u PGDATABASE \
+    psql -X -v ON_ERROR_STOP=1 -d postgres "$@")
+}
+node_script() { (cd "$APP_DIR/server" && as_app env TZ=Asia/Karachi NODE_ENV=production node "dist/$1.js" "${@:2}"); }
+
+health_url() { echo "http://127.0.0.1:${PORT:-4000}/api/v1/health"; }
+wait_healthy() {
+  local i body
+  for i in $(seq 1 30); do
+    if body=$(curl -fsS --max-time 3 "$(health_url)" 2>/dev/null) && [[ $body == *'"db":true'* ]]; then
+      echo "healthy: $body"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "the app did not report healthy within 60 s; see: journalctl -u $SERVICE -n 100" >&2
+  return 1
+}
+
+# ---------------------------------------------------------------------------------------------------------------
+cmd_status() {
+  systemctl --no-pager status "$SERVICE" | head -n 12 || true
+  echo
+  if [[ -r $ENV_FILE ]]; then load_env; fi
+  curl -fsS --max-time 3 "$(health_url)" && echo || echo "health check FAILED ($(health_url))"
+  echo
+  systemctl --no-pager list-timers nacta-attendance-backup.timer 2>/dev/null | head -n 3 || true
+  if [[ -d $BACKUP_DIR ]]; then
+    echo "latest backup: $(ls -1t "$BACKUP_DIR"/attendance-*.dump* 2>/dev/null | head -n 1 || echo none)"
+  fi
+  df -h "$APP_DIR" /var/lib 2>/dev/null | sed 's/^/disk: /'
+}
+
+cmd_logs() { journalctl -u "$SERVICE" -n "${1:-200}" --no-pager -o cat; }
+cmd_follow() { journalctl -u "$SERVICE" -f -o cat; }
+
+cmd_restart() {
+  need_root restart
+  load_env
+  systemctl restart "$SERVICE"
+  wait_healthy
+}
+
+cmd_migrate() {
+  need_root migrate
+  load_env
+  node_script migrate
+}
+
+cmd_reset_password() {
+  need_root reset-password
+  [[ -n ${1:-} ]] || die "usage: sudo nacta-attendance reset-password <email>"
+  load_env
+  # The script prompts for the new password with hidden input.
+  (cd "$APP_DIR/server" && runuser -u "$APP_USER" -- env TZ=Asia/Karachi NODE_ENV=production node dist/resetAdminPassword.js "$1")
+}
+
+cmd_backup() {
+  need_root backup
+  load_env
+  local quiet=0
+  [[ ${1:-} == --quiet ]] && quiet=1
+  install -d -m 0700 -o root -g root "$BACKUP_DIR"
+  local ts out
+  ts=$(date +%Y%m%d-%H%M%S)
+  out="$BACKUP_DIR/attendance-$ts.dump"
+  pg_dump --format=custom --no-owner --no-acl --file="$out.partial"
+  mv "$out.partial" "$out"
+  if [[ -n ${BACKUP_PASSPHRASE_FILE:-} ]]; then
+    [[ -r $BACKUP_PASSPHRASE_FILE ]] || die "BACKUP_PASSPHRASE_FILE $BACKUP_PASSPHRASE_FILE is not readable"
+    openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass "file:$BACKUP_PASSPHRASE_FILE" -in "$out" -out "$out.enc"
+    rm -f "$out"
+    out="$out.enc"
+  fi
+  chmod 0600 "$out"
+  find "$BACKUP_DIR" -maxdepth 1 -type f -name 'attendance-*.dump*' -mtime +"$BACKUP_KEEP_DAYS" -delete
+  if [[ -n ${BACKUP_COPY_DIR:-} ]]; then
+    # Optional second copy, e.g. an NFS/SMB share mounted from the backup server.
+    cp -p "$out" "$BACKUP_COPY_DIR/" || echo "warning: could not copy the backup to $BACKUP_COPY_DIR" >&2
+  fi
+  if [[ $quiet -eq 0 ]]; then echo "backup written: $out ($(du -h "$out" | cut -f1))"; else echo "$out"; fi
+}
+
+# Replace the database with a dump. Used by "restore" and by install.sh --restore.
+restore_dump() {
+  local file=$1 work=$file
+  if [[ $file == *.enc ]]; then
+    [[ -r ${BACKUP_PASSPHRASE_FILE:-} ]] || die "$file is encrypted; set BACKUP_PASSPHRASE_FILE in $ENV_FILE"
+    work=$(mktemp /tmp/nacta-restore.XXXXXX.dump)
+    openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$BACKUP_PASSPHRASE_FILE" -in "$file" -out "$work"
+  fi
+  pg_restore --list "$work" >/dev/null || die "$file is not a pg_dump custom-format file"
+  info "recreating database $DB_NAME"
+  pg_super -q \
+    -c "DROP DATABASE IF EXISTS \"$DB_NAME\" WITH (FORCE)" \
+    -c "CREATE DATABASE \"$DB_NAME\" OWNER \"$DB_USER\" ENCODING 'UTF8' TEMPLATE template0" \
+    -c "ALTER DATABASE \"$DB_NAME\" SET timezone TO 'Asia/Karachi'"
+  info "restoring $(du -h "$work" | cut -f1) (a few minutes for a large database)"
+  # Runs as the app's own database role, so every restored object belongs to it.
+  pg_restore --no-owner --no-acl --exit-on-error --jobs=2 --dbname="$DB_NAME" "$work"
+  [[ $work != "$file" ]] && rm -f "$work"
+  info "applying any newer migrations"
+  node_script migrate
+  psql -X -At -c "SELECT 'employees: ' || count(*) FROM employees UNION ALL SELECT 'punches:   ' || count(*) FROM attendance_logs UNION ALL SELECT 'users:     ' || count(*) FROM users"
+}
+
+cmd_restore() {
+  need_root restore
+  local file=${1:-}
+  [[ -f $file ]] || die "usage: sudo nacta-attendance restore <backup file>"
+  load_env
+  echo "This REPLACES the whole '$DB_NAME' database with:"
+  echo "    $file"
+  echo "The current database is backed up first."
+  read -r -p "Type RESTORE to continue: " answer
+  [[ $answer == RESTORE ]] || die "cancelled"
+  info "safety backup of the current database"
+  cmd_backup
+  systemctl stop "$SERVICE"
+  restore_dump "$file"
+  systemctl start "$SERVICE"
+  wait_healthy
+}
+
+cmd_update() {
+  need_root update
+  load_env
+  local before after
+  before=$(as_app git -C "$APP_DIR" rev-parse --short HEAD)
+  info "fetching the latest code"
+  as_app git -C "$APP_DIR" pull --ff-only
+  after=$(as_app git -C "$APP_DIR" rev-parse --short HEAD)
+  if [[ $before == "$after" && ${1:-} != --force ]]; then
+    echo "already up to date ($after). Use 'update --force' to rebuild anyway."
+    return 0
+  fi
+  info "backing up the database before updating ($before -> $after)"
+  cmd_backup
+  build_app
+  systemctl stop "$SERVICE"
+  node_script migrate
+  systemctl start "$SERVICE"
+  wait_healthy
+  info "updated to $after"
+}
+
+build_app() {
+  info "installing dependencies"
+  (cd "$APP_DIR" && as_app npm ci --no-audit --no-fund)
+  info "building"
+  (cd "$APP_DIR" && as_app npm run build)
+}
+
+cmd_help() {
+  cat <<EOF
+nacta-attendance - NACTA Attendance server administration
+
+  status                       service state, health check, last backup, disk space
+  logs [N]                     last N log lines (default 200)
+  follow                       live log
+  restart                      restart the app and wait until it is healthy        (sudo)
+  update [--force]             git pull, back up, build, migrate, restart          (sudo)
+  backup                       back up the database to $BACKUP_DIR                 (sudo)
+  restore <file>               replace the database with a backup file             (sudo)
+  migrate                      apply database migrations                           (sudo)
+  reset-password <email>       set a temporary password for a locked-out user      (sudo)
+
+Config: $ENV_FILE   Code: $APP_DIR   Service: systemctl status $SERVICE
+EOF
+}
+
+# install.sh sources this file for its helpers; only dispatch when run as a command.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  cmd=${1:-help}
+  shift || true
+  case $cmd in
+    status) cmd_status "$@" ;;
+    logs) cmd_logs "$@" ;;
+    follow) cmd_follow ;;
+    restart) cmd_restart ;;
+    update) cmd_update "$@" ;;
+    backup) cmd_backup "$@" ;;
+    restore) cmd_restore "$@" ;;
+    migrate) cmd_migrate ;;
+    reset-password) cmd_reset_password "$@" ;;
+    help | -h | --help) cmd_help ;;
+    *) cmd_help; exit 2 ;;
+  esac
+fi

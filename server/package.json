@@ -1,0 +1,53 @@
+{
+  "name": "attendance-server",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "migrate": "tsx src/db/migrate.ts",
+    "db:create": "tsx src/db/createDb.ts",
+    "admin:reset-password": "tsx src/scripts/resetAdminPassword.ts",
+    "migrate:prod": "node dist/migrate.js",
+    "db:create:prod": "node dist/createDb.js",
+    "admin:reset-password:prod": "node dist/resetAdminPassword.js"
+  },
+  "dependencies": {
+    "@nacta/shared": "*",
+    "@node-rs/argon2": "^2.2.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "helmet": "^8.3.0",
+    "multer": "^2.5.0",
+    "pdfmake": "0.3.13",
+    "pg": "^8.12.0",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^7.2.1",
+    "pino-pretty": "^13.2.0",
+    "supertest": "^7.3.2",
+    "tsup": "^9.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.1"
+  }
+}

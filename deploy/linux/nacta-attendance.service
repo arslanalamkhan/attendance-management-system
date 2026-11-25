@@ -1,0 +1,40 @@
+[Unit]
+Description=NACTA Attendance (web app, API and ZKTeco ADMS receiver)
+Documentation=file:///opt/nacta-attendance/docs/DEPLOYMENT.md
+After=network-online.target postgresql.service postgresql-18.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nacta
+Group=nacta
+WorkingDirectory=/opt/nacta-attendance/server
+EnvironmentFile=/etc/nacta-attendance/attendance.env
+# Attendance days are worked out in Pakistan time whatever the VM's own timezone is.
+Environment=TZ=Asia/Karachi NODE_ENV=production
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+# Logs go to the journal: journalctl -u nacta-attendance
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nacta-attendance
+
+# Hardening: the service can only write to its own state directory; everything else is read-only.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+StateDirectory=nacta-attendance
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
