@@ -41,6 +41,16 @@ export function formatMinutes(min: number): string {
 }
 
 /** "HH:mm" + minutes -> "HH:mm". */
+/**
+ * For a night shift: the clock time where its day hands over to the next (halfway through the off-duty gap, the same
+ * rule the server uses). 17:00-09:00 -> "13:00". Punches before it on the next date belong to the shift.
+ */
+export function nightSplitTime(h: { start: string; end: string }): string {
+  const m = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const mid = Math.floor((m(h.start) + m(h.end)) / 2);
+  return `${String(Math.floor(mid / 60)).padStart(2, '0')}:${String(mid % 60).padStart(2, '0')}`;
+}
+
 export function addToTime(t: string, delta: number): string {
   const [h = 0, m = 0] = t.split(':').map(Number);
   const total = Math.min(24 * 60 - 1, Math.max(0, h * 60 + m + delta));
@@ -118,12 +128,13 @@ export function describeSkipped(e: WorkingDayEstimate): string {
 /** The explanation line in the timing editor. */
 export function explainTiming(startTime: string | null, endTime: string | null, graceLate: number, graceEarly: number, halfDayBelow: number): string {
   if (!startTime || !endTime) return 'Switch on at least one working day to see how late, early and half days are decided.';
-  return `Arriving after ${addToTime(startTime, graceLate)} is late; leaving before ${addToTime(endTime, -graceEarly)} is early; under ${formatMinutes(halfDayBelow)} worked is a half day.`;
+  const night = endTime < startTime;
+  return `${night ? `Night shift: ${startTime} to ${endTime} the next morning, counted on the day it starts. ` : ''}Arriving after ${addToTime(startTime, graceLate)} is late; leaving before ${addToTime(endTime, -graceEarly)}${night ? ' the next morning' : ''} is early; under ${formatMinutes(halfDayBelow)} worked is a half day.`;
 }
 
 /** Plain-language reason for a computed day (shown in the day panel). */
 export function explainDay(d: AttendanceDay): string {
-  const hours = d.timing ? `${d.timing.profileName}, ${d.timing.start}\u2013${d.timing.end}` : null;
+  const hours = d.timing ? `${d.timing.profileName}, ${d.timing.start}\u2013${d.timing.end}${d.timing.end < d.timing.start ? ' next day' : ''}` : null;
   const corrected = d.corrected ? ' A correction was applied to this day.' : '';
   switch (d.status) {
     case 'present':

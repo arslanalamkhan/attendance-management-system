@@ -273,7 +273,7 @@ function AttendanceTab({ employee }: { employee: EmployeeDetail }) {
         }}
         onCorrect={(d) => {
           setPanelDay(null);
-          setCorrectFor({ employeeId: employee.id, name: employee.name, date: d });
+          setCorrectFor({ employeeId: employee.id, name: employee.name, date: d, timing: dayMap.get(d)?.timing ?? null });
         }}
       />
       <MarkLeaveSheet open={leaveFor !== null} onOpenChange={(o) => !o && setLeaveFor(null)} initial={lastLeave.current} />

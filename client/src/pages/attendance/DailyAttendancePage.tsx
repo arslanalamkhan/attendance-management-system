@@ -330,7 +330,7 @@ export default function DailyAttendancePage() {
                     </DropdownMenuItem>
                   )}
                   {canCorrect && (
-                    <DropdownMenuItem onSelect={() => setCorrectFor({ employeeId: d.employeeId, name: d.name, date })}>
+                    <DropdownMenuItem onSelect={() => setCorrectFor({ employeeId: d.employeeId, name: d.name, date, timing: d.timing })}>
                       <FilePenLine aria-hidden="true" /> Correct...
                     </DropdownMenuItem>
                   )}

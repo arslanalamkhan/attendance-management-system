@@ -1,5 +1,5 @@
 import type { AttendanceDay, DayStatus } from '@nacta/shared';
-import { addDays, type LocalNow } from '../../lib/dates';
+import { addDays, daysBetween, type LocalNow } from '../../lib/dates';
 import { dayKind, type ResolvedTiming } from './resolve';
 
 // The attendance rules engine: a pure function from one employee-day's inputs to its computed status.
@@ -52,7 +52,10 @@ export interface EngineInput {
   holidays: { name: string; kind: 'holiday' | 'working_day' }[];
   leave: EngineLeave | null;
   corrections: EngineCorrection[];
-  /** Device-local punch times of that date from every device: "HH:mm" or "HH:mm:ss". */
+  /**
+   * Device-local punches that belong to this day, from every device: "HH:mm[:ss]" on `date`, or a full
+   * "YYYY-MM-DD HH:mm:ss" (a night shift's morning punches fall on the next calendar date).
+   */
   punches: string[];
 }
 
@@ -63,10 +66,45 @@ export type EngineDay = AttendanceDay & {
 
 const toMin = (t: string): number => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
 const toSec = (t: string): number => toMin(t) * 60 + (t.length >= 8 ? Number(t.slice(6, 8)) : 0);
-const hhmm = (min: number): string => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+/** Seconds from midnight of `date`; a punch on a later date counts past 24:00. */
+const secOn = (date: string, p: string): number => {
+  if (p.length > 10 && p[10] === ' ') return daysBetween(date, p.slice(0, 10)) * 86_400 + toSec(p.slice(11));
+  return toSec(p);
+};
+/** Clock time for display; a time past midnight shows as the next morning's clock time. */
+const hhmm = (min: number): string => {
+  const m = ((min % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+};
 
 /** Day boundaries after which "no punch" means absent: office end + 2 hours. */
 export const DAY_OVER_AFTER_END_MINUTES = 120;
+
+/**
+ * Where one attendance day hands over to the next around a night shift, in minutes from midnight: halfway through
+ * the off-duty gap between the shift's end (next morning) and its start. 17:00-09:00 -> 13:00, 22:00-06:00 -> 14:00.
+ * Punches before it on the next calendar date still belong to the night shift that started the day before.
+ */
+export function overnightAnchorMinutes(h: { start: string; end: string }): number {
+  return Math.floor((toMin(h.start) + toMin(h.end)) / 2);
+}
+
+/**
+ * Where the attendance day of a date begins, in minutes after its midnight, from the scheduled hours of that date and
+ * the date before (null = day off). Normally midnight. A night shift's day begins at its anchor; the day after a night
+ * shift begins once that shift's morning is over, so the check-out is never counted twice. Each day's punches are
+ * those from its own beginning up to the next day's beginning.
+ */
+export function dayStartMinutes(own: { start: string; end: string } | null, prev: { start: string; end: string } | null): number {
+  if (own && own.end < own.start) return overnightAnchorMinutes(own);
+  if (prev && prev.end < prev.start) {
+    if (!own) return overnightAnchorMinutes(prev);
+    // A day shift right after a night shift: split between the night's end and the day's start.
+    const prevEnd = toMin(prev.end);
+    return Math.floor((prevEnd + Math.max(toMin(own.start), prevEnd)) / 2);
+  }
+  return 0;
+}
 
 export function isInactive(e: EngineEmployee, date: string): boolean {
   if (e.joinDate && date < e.joinDate) return true;
@@ -106,10 +144,19 @@ export function computeDay(input: EngineInput): EngineDay {
 
   if (isInactive(employee, date)) return { ...base, status: 'inactive' };
 
+  // ---- what kind of day is it ----
+  const kind = dayKind(timing, date, input.holidays);
+  // A night shift (end earlier than start) runs into the next morning: its end is counted past 24:00.
+  const night = kind.kind === 'working' && kind.hours.end < kind.hours.start;
+
   // ---- punches (device punches plus manual ones from corrections) ----
   const manual = input.corrections.filter((c) => c.type === 'add_punch' && c.time);
   const override = [...input.corrections].filter((c) => c.type === 'set_status' && c.status).sort((a, b) => b.id - a.id)[0];
-  const secs = [...input.punches.map(toSec), ...manual.map((c) => toSec(c.time as string))].sort((a, b) => a - b);
+  // On a night shift a manual punch earlier in the clock than the middle of the off-duty gap is the next morning's
+  // (e.g. 17:00-09:00: a correction at 08:55 is the check-out, one at 16:50 the check-in).
+  const nightSplit = night && kind.kind === 'working' ? overnightAnchorMinutes(kind.hours) * 60 : 0;
+  const manualSec = (t: string) => (night && toSec(t) < nightSplit ? toSec(t) + 86_400 : toSec(t));
+  const secs = [...input.punches.map((p) => secOn(date, p)), ...manual.map((c) => manualSec(c.time as string))].sort((a, b) => a - b);
   const corrected = manual.length > 0 || !!override;
   base.corrected = corrected;
   base.punchCount = secs.length;
@@ -122,9 +169,7 @@ export function computeDay(input: EngineInput): EngineDay {
   const lastMin = hasOut && last !== undefined ? Math.floor(last / 60) : null;
   base.workedMinutes = hasOut && first !== undefined && last !== undefined ? Math.floor((last - first) / 60) : 0;
 
-  // ---- what kind of day is it ----
-  const kind = dayKind(timing, date, input.holidays);
-  const finish = (status: DayStatus, extra: Partial<EngineDay> = {}): EngineDay => {
+  const finish =(status: DayStatus, extra: Partial<EngineDay> = {}): EngineDay => {
     const day: EngineDay = { ...base, ...extra, status };
     if (override) day.status = override.status as DayStatus;
     return day;
@@ -136,10 +181,11 @@ export function computeDay(input: EngineInput): EngineDay {
   const { start, end } = kind.hours;
   base.timing = { profileName: timing.profileName, start, end };
   const startMin = toMin(start);
-  const endMin = toMin(end);
-  const today = now.date;
-  const over = date < today || (date === today && now.minutes > endMin + DAY_OVER_AFTER_END_MINUTES);
-  const closed = date < today || (date === today && now.minutes >= endMin);
+  const endMin = toMin(end) + (night ? 1440 : 0);
+  // "now" in minutes from midnight of `date` (a night shift is still running the next morning).
+  const nowMin = daysBetween(date, now.date) * 1440 + now.minutes;
+  const over = night ? nowMin > endMin + DAY_OVER_AFTER_END_MINUTES : date < now.date || (date === now.date && now.minutes > endMin + DAY_OVER_AFTER_END_MINUTES);
+  const closed = night ? nowMin >= endMin : date < now.date || (date === now.date && now.minutes >= endMin);
   const leave = input.leave;
   if (leave) {
     base.leave = { leaveId: leave.leaveId, typeName: leave.typeName, code: leave.code, color: leave.color, part: leave.part };

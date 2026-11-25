@@ -241,7 +241,9 @@ describe('timings: versions apply forwards', () => {
     expect(ram).toMatchObject({ name: 'Ramadan', isDefault: false, assignmentCount: 0 });
     expect((await api.post(`${V1}/timings`).send(body({ name: 'ramadan' }))).status).toBe(409);
     expect((await api.post(`${V1}/timings`).send({ ...body({ name: 'Bad' }), days: [null] })).status).toBe(400);
-    expect((await api.post(`${V1}/timings`).send({ ...body({ name: 'Bad' }), days: [null, { start: '17:00', end: '09:00' }, null, null, null, null, null] })).status).toBe(400);
+    // start = end is meaningless; an end before the start is a night shift (allowed, see "night shifts")
+    const same = await api.post(`${V1}/timings`).send({ ...body({ name: 'Bad' }), days: [null, { start: '09:00', end: '09:00' }, null, null, null, null, null] });
+    expect(same.status).toBe(400);
 
     const del = await api.delete(`${V1}/timings/1`);
     expect([del.status, del.body.error.code]).toEqual([409, 'CONFLICT']);
@@ -267,6 +269,96 @@ describe('timings: versions apply forwards', () => {
     expect((await api.delete(`${V1}/timings/${p.id}`)).status).toBe(204);
     expect((await auditRows('timing.create'))[0]?.summary).toContain('Created office timing Temp');
     expect((await auditRows('timing.delete'))[0]?.summary).toBe('Deleted office timing Temp');
+  });
+});
+
+describe('night shifts (end earlier than start)', () => {
+  const NIGHT = { start: '17:00', end: '09:00' };
+  async function setup() {
+    await allDaysWorking();
+    const created = await api.post(`${V1}/timings`).send({
+      name: 'Night duty',
+      days: Array.from({ length: 7 }, () => NIGHT),
+      graceLateMinutes: 10,
+      graceEarlyMinutes: 5,
+      halfDayBelowMinutes: 240,
+    });
+    expect(created.status).toBe(201);
+    const night = zTimingProfile.parse(created.body);
+    expect(night.days[1]).toEqual(NIGHT);
+    const dayWorker = await mkEmp('1', 'Day Worker');
+    const guard = await mkEmp('2', 'Night Guard');
+    await pool.query(`INSERT INTO timing_assignments (profile_id, scope, scope_id, effective_from) VALUES ($1, 'employee', $2, $3)`, [night.id, guard.id, ago(20)]);
+    return { dayWorker, guard };
+  }
+
+  it('the morning check-out counts for the night the shift started; late, early and absent across midnight', async () => {
+    const { dayWorker, guard } = await setup();
+    // night of ago(3): 16:55 in, 09:05 next morning out -> present, 16h10m
+    await punch('2', ago(3), '16:55:00');
+    await punch('2', ago(2), '09:05:00');
+    // night of ago(2): 17:20 in (late 20 > grace 10), 08:30 out (early 30 > grace 5)
+    await punch('2', ago(2), '17:20:00');
+    await punch('2', ago(1), '08:30:00');
+    // night of ago(1): nobody came -> absent once this morning is over
+    // the day worker is unaffected: midnight to midnight as before
+    await punch('1', ago(2), '09:00:00');
+    await punch('1', ago(2), '17:00:00');
+
+    const today = TODAY();
+    setClock(() => new Date(`${today}T20:00:00+05:00`));
+    try {
+      const days = zAttendanceDay.array().parse((await api.get(`${V1}/attendance/days?employeeId=${guard.id}&from=${ago(3)}&to=${TODAY()}`)).body);
+      const [n3, n2, n1, n0] = days;
+      expect(n3).toMatchObject({ status: 'present', firstIn: '16:55', lastOut: '09:05', workedMinutes: 970, punchCount: 2, lateMinutes: 0, earlyLeave: false });
+      expect(n3?.timing).toEqual({ profileName: 'Night duty', start: '17:00', end: '09:00' });
+      expect(n2).toMatchObject({ status: 'late', firstIn: '17:20', lastOut: '08:30', lateMinutes: 20, earlyLeave: true, earlyMinutes: 30, punchCount: 2 });
+      expect(n1).toMatchObject({ status: 'absent', punchCount: 0 });
+      expect(n0?.status).toBe('pending'); // tonight's shift runs until tomorrow 09:00: not absent yet
+      const dw = zAttendanceDay.array().parse((await api.get(`${V1}/attendance/days?employeeId=${dayWorker.id}&from=${ago(2)}&to=${ago(2)}`)).body);
+      expect(dw[0]).toMatchObject({ status: 'present', firstIn: '09:00', lastOut: '17:00', workedMinutes: 480 });
+    } finally {
+      setClock(null);
+    }
+  });
+
+  it('yesterday\'s night is still running this morning, and becomes a missing punch 2h after its end', async () => {
+    const { guard } = await setup();
+    await punch('2', ago(1), '17:00:00');
+    const today = TODAY();
+    const yesterday = ago(1);
+    setClock(() => new Date(`${today}T07:00:00+05:00`));
+    try {
+      const early = zAttendanceDay.array().parse((await api.get(`${V1}/attendance/days?employeeId=${guard.id}&from=${yesterday}&to=${yesterday}`)).body);
+      expect(early[0]).toMatchObject({ status: 'present', firstIn: '17:00', lastOut: null, earlyLeave: false });
+      // after 11:00 with no check-out the shift is over: missing punch. Yesterday is not frozen in the cache.
+      setClock(() => new Date(`${today}T11:30:00+05:00`));
+      await pool.query('UPDATE attendance_days SET computed_at = now() - interval \'1 hour\'');
+      const later = zAttendanceDay.array().parse((await api.get(`${V1}/attendance/days?employeeId=${guard.id}&from=${yesterday}&to=${yesterday}`)).body);
+      expect(later[0]?.status).toBe('incomplete');
+    } finally {
+      setClock(null);
+    }
+  });
+
+  it('a manual punch before the split time is the next morning (missing check-out)', async () => {
+    const { guard } = await setup();
+    await punch('2', ago(3), '17:00:00');
+    const c = await api.post(`${V1}/attendance/corrections`).send({ employeeId: guard.id, date: ago(3), type: 'add_punch', time: '09:00', reason: 'Forgot to punch out' });
+    expect(c.status).toBe(201);
+    await worker.drain({ yieldMs: 0 });
+    const d = zAttendanceDay.array().parse((await api.get(`${V1}/attendance/days?employeeId=${guard.id}&from=${ago(3)}&to=${ago(3)}`)).body);
+    expect(d[0]).toMatchObject({ status: 'present', firstIn: '17:00', lastOut: '09:00', workedMinutes: 960 });
+  });
+
+  it('a punch from the device queues the day before too (it may close a night shift)', async () => {
+    const { guard } = await setup();
+    if (!deviceId) deviceId = (await createDevice('RULESDEV1')).id;
+    await pool.query('DELETE FROM attendance_dirty');
+    const res = await adms.post(`/iclock/cdata?SN=RULESDEV1&table=ATTLOG&Stamp=1`).set('Content-Type', 'text/plain').send(`2\t${ago(1)} 08:58:00\t1\t1\t0\t0\t0\n`);
+    expect(res.status).toBe(200);
+    const q = await pool.query(`SELECT to_char(date, 'YYYY-MM-DD') AS d FROM attendance_dirty WHERE employee_id = $1 ORDER BY date`, [guard.id]);
+    expect(q.rows.map((r) => r.d)).toEqual([ago(2), ago(1)]);
   });
 });
 
@@ -838,19 +930,23 @@ describe('recompute queue and worker', () => {
     const post = (time: string) =>
       adms.post(`/iclock/cdata?SN=${dev.serialNumber}&table=ATTLOG&Stamp=1`).set('Content-Type', 'text/plain').send(`501\t${day} ${time}\t0\t1\n`);
     expect((await post('09:00:00')).text).toMatch(/^OK/);
-    expect((await pool.query('SELECT employee_id, to_char(date, \'YYYY-MM-DD\') AS d FROM attendance_dirty')).rows).toEqual([{ employee_id: e.id, d: day }]);
+    // the punch's day, and the day before (a morning punch can close a night shift that started the evening before)
+    expect((await pool.query('SELECT employee_id, to_char(date, \'YYYY-MM-DD\') AS d FROM attendance_dirty ORDER BY date')).rows).toEqual([
+      { employee_id: e.id, d: addDays(day, -1) },
+      { employee_id: e.id, d: day },
+    ]);
 
-    expect(await worker.drain({ yieldMs: 0 })).toBe(1);
+    expect(await worker.drain({ yieldMs: 0 })).toBe(2);
     expect(await dirtyCount()).toBe(0);
-    const cached = (await pool.query('SELECT status, first_in, punch_count FROM attendance_days WHERE employee_id = $1', [e.id])).rows;
+    const cached = (await pool.query('SELECT status, first_in, punch_count FROM attendance_days WHERE employee_id = $1 AND date = $2', [e.id, day])).rows;
     expect(cached).toEqual([{ status: 'incomplete', first_in: '09:00', punch_count: 1 }]);
 
     // a later punch: the read is already correct, and the worker refreshes the cache
     await post('17:00:00');
-    expect(await dirtyCount()).toBe(1);
+    expect(await dirtyCount()).toBe(2); // that day and the day before
     expect(statusOf(await daily(day), '501')).toBe('present');
     await worker.drain({ yieldMs: 0 });
-    expect((await pool.query('SELECT status, last_out FROM attendance_days WHERE employee_id = $1', [e.id])).rows).toEqual([{ status: 'present', last_out: '17:00' }]);
+    expect((await pool.query('SELECT status, last_out FROM attendance_days WHERE employee_id = $1 AND date = $2', [e.id, day])).rows).toEqual([{ status: 'present', last_out: '17:00' }]);
 
     // a duplicate punch changes nothing and queues nothing
     await post('17:00:00');

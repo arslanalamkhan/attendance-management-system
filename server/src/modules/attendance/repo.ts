@@ -17,14 +17,16 @@ export async function insertBatch(deviceId: number, records: AttlogRecord[]): Pr
       vals.push(deviceId, r.pin, r.punchTime, r.status, r.verifyType, r.workCode, r.raw);
       return `($${o + 1}, $${o + 2}, $${o + 3}::timestamp, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7})`;
     });
-    // Newly stored punches queue their (employee, day) for recomputation, in the same statement.
+    // Newly stored punches queue their (employee, day) for recomputation, in the same statement. The day before is
+    // queued too: a morning punch can be the check-out of a night shift that started the evening before.
     const { rows } = await pool.query<{ n: string }>(
       `WITH ins AS (
          INSERT INTO attendance_logs (device_id, pin, punch_time, status, verify_type, work_code, raw)
          VALUES ${ph.join(', ')} ON CONFLICT (device_id, pin, punch_time) DO NOTHING RETURNING pin, punch_time
        ), q AS (
          INSERT INTO attendance_dirty (employee_id, date)
-         SELECT DISTINCT e.id, i.punch_time::date FROM ins i JOIN employees e ON e.emp_code = i.pin
+         SELECT DISTINCT e.id, i.punch_time::date - o.n FROM ins i JOIN employees e ON e.emp_code = i.pin
+         CROSS JOIN (VALUES (0), (1)) AS o(n)
          ON CONFLICT (employee_id, date) DO UPDATE SET queued_at = now()
        )
        SELECT count(*) AS n FROM ins`,

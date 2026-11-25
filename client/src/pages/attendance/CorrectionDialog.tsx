@@ -7,6 +7,7 @@ import { useApiMutation } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { formatDate } from '../../lib/dates';
 import { createCorrection, deleteCorrection, listCorrections } from '../../lib/endpoints/rules';
+import { nightSplitTime } from '../../lib/rules-ui';
 import { qk } from '../../lib/query-keys';
 import { relativeTime } from '../../lib/time';
 import { Button } from '../../components/ui/button';
@@ -22,6 +23,8 @@ export interface CorrectionTarget {
   employeeId: number;
   name: string;
   date: string;
+  /** The day's hours, when known: a night shift changes what a morning time means. */
+  timing?: { start: string; end: string } | null;
 }
 
 type Kind = 'add_punch' | 'set_status';
@@ -131,7 +134,16 @@ function CorrectionBody({ target, onClose }: { target: CorrectionTarget; onClose
         </div>
 
         {kind === 'add_punch' ? (
-          <FormField label="Punch time" required error={errors.time} hint="The first punch of the day counts as arrival, the last as departure.">
+          <FormField
+            label="Punch time"
+            required
+            error={errors.time}
+            hint={
+              target.timing && target.timing.end < target.timing.start
+                ? `Night shift (${target.timing.start} to ${target.timing.end} next day): a time before ${nightSplitTime(target.timing)} is taken as the next morning, e.g. a missing check-out.`
+                : 'The first punch of the day counts as arrival, the last as departure.'
+            }
+          >
             <Input type="time" mono value={time} onChange={(e) => setTime(e.target.value)} className="w-40" />
           </FormField>
         ) : (

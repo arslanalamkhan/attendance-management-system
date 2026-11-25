@@ -20,10 +20,24 @@ export const WEEKDAYS = [
 ] as const;
 
 // ---------- Office timings ----------
-/** One weekday's hours; null in `days` = day off (weekend). */
+/**
+ * One weekday's hours; null in `days` = day off (weekend). An end earlier than the start is a night shift that ends
+ * the next morning (e.g. 17:00 - 09:00): it belongs to the weekday it STARTS on, and its morning punches count
+ * towards that day.
+ */
 export const zDayHours = z
   .object({ start: zTime, end: zTime })
-  .refine((h) => h.start < h.end, { message: 'End must be after start', path: ['end'] });
+  .refine((h) => h.start !== h.end, { message: 'Start and end cannot be the same time', path: ['end'] });
+
+/** True for a night shift that ends on the next calendar day (end earlier than start). */
+export const isOvernight = (h: { start: string; end: string } | null | undefined): boolean => !!h && h.end < h.start;
+
+/** Length of a shift in minutes, across midnight for a night shift. */
+export function shiftMinutes(h: { start: string; end: string }): number {
+  const m = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const d = m(h.end) - m(h.start);
+  return d > 0 ? d : d + 1440;
+}
 
 export const zTimingProfileInput = z.object({
   name: z.string().trim().min(1, 'Name is required').max(60),

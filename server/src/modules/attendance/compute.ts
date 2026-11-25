@@ -1,7 +1,7 @@
 import type { Queryable } from '../../db/pool';
 import { pool } from '../../db/pool';
-import { localNow, todayLocal, SERVER_TZ, type LocalNow } from '../../lib/dates';
-import { computeDay, type EngineCorrection, type EngineDay, type EngineEmployee, type EngineLeave, type LeavePart } from './engine';
+import { addDays, localNow, todayLocal, weekdayOf, SERVER_TZ, type LocalNow } from '../../lib/dates';
+import { computeDay, dayStartMinutes, type EngineCorrection, type EngineDay, type EngineEmployee, type EngineLeave, type LeavePart } from './engine';
 import {
   holidaysFor,
   resolveTiming,
@@ -124,13 +124,29 @@ async function computeChunk(keys: Key[], db: Queryable, now: LocalNow, preRules?
   const kCode = live.map((k) => (empById.get(k.employeeId) as { emp_code: string }).emp_code);
   const kDate = live.map((k) => k.date);
 
-  const [rules, punches, leaves, corrs] = await seq([
-    async () => preRules ?? (await loadRules(minDate, maxDate, db)),
+  const rules = preRules ?? (await loadRules(minDate, maxDate, db));
+  // Each day's punch window: from its own beginning to the next day's beginning (midnight to midnight, except around
+  // night shifts, whose morning punches belong to the day the shift started).
+  const scheduled = (eid: number, wingId: number | null, date: string) =>
+    resolveTiming(rules.profiles, rules.assignments, { id: eid, wingId }, date).days[weekdayOf(date)] ?? null;
+  const startsAt = (eid: number, wingId: number | null, date: string) => {
+    const m = dayStartMinutes(scheduled(eid, wingId, date), scheduled(eid, wingId, addDays(date, -1)));
+    return `${date} ${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}:00`;
+  };
+  const kFrom: string[] = [];
+  const kTo: string[] = [];
+  for (const k of live) {
+    const wingId = (empById.get(k.employeeId) as { wing_id: number | null }).wing_id;
+    kFrom.push(startsAt(k.employeeId, wingId, k.date));
+    kTo.push(startsAt(k.employeeId, wingId, addDays(k.date, 1)));
+  }
+
+  const [punches, leaves, corrs] = await seq([
     () => db.query<{ eid: number; d: string; t: string }>(
-      `SELECT k.eid, to_char(a.punch_time, 'YYYY-MM-DD') AS d, to_char(a.punch_time, 'HH24:MI:SS') AS t
-       FROM unnest($1::int[], $2::text[], $3::date[]) AS k(eid, code, d)
-       JOIN attendance_logs a ON a.pin = k.code AND a.punch_time >= k.d AND a.punch_time < k.d + 1`,
-      [kEmp, kCode, kDate],
+      `SELECT k.eid, to_char(k.d, 'YYYY-MM-DD') AS d, to_char(a.punch_time, 'YYYY-MM-DD HH24:MI:SS') AS t
+       FROM unnest($1::int[], $2::text[], $3::date[], $4::timestamp[], $5::timestamp[]) AS k(eid, code, d, f, t)
+       JOIN attendance_logs a ON a.pin = k.code AND a.punch_time >= k.f AND a.punch_time < k.t`,
+      [kEmp, kCode, kDate, kFrom, kTo],
     ),
     () => db.query<{ eid: number; d: string; id: number; part: LeavePart; name: string; code: string; color: string; cap: boolean }>(
       `SELECT k.eid, to_char(k.d, 'YYYY-MM-DD') AS d, l.id, l.part, t.name, t.code, t.color, t.counts_as_present AS cap

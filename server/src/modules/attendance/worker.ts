@@ -84,11 +84,16 @@ export async function backfillIfEmpty(): Promise<number> {
   return r.rowCount ?? 0;
 }
 
-/** Re-queue today for everybody: status changes with the clock (pending -> absent, early leave, half day). */
+/**
+ * Re-queue today for everybody: status changes with the clock (pending -> absent, early leave, half day). Yesterday's
+ * night shifts too: they end this morning.
+ */
 export async function refreshToday(): Promise<number> {
   const today = todayLocal();
   const r = await pool.query(
-    `INSERT INTO attendance_dirty (employee_id, date) SELECT employee_id, date FROM attendance_days WHERE date = $1::date
+    `INSERT INTO attendance_dirty (employee_id, date)
+     SELECT employee_id, date FROM attendance_days
+     WHERE date = $1::date OR (date = $1::date - 1 AND (timing->>'end') < (timing->>'start'))
      ON CONFLICT (employee_id, date) DO UPDATE SET queued_at = now()`,
     [today],
   );

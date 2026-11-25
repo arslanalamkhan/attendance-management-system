@@ -11,6 +11,11 @@ import type { EngineDay } from './engine';
 
 /** Cached rows for today older than this are recomputed on read (the status depends on the clock). */
 const TODAY_FRESH_MS = 5 * 60_000;
+/**
+ * A cached past day is final, except yesterday's night shift: it runs into this morning, so it is treated like today
+ * (recomputed when stale) until the day after. $4 is today.
+ */
+const SETTLED = `(ad.date < $4::date - 1 OR (ad.date < $4::date AND COALESCE((ad.timing->>'end') > (ad.timing->>'start'), true)))`;
 /** Longest range accepted by the read endpoints. */
 export const MAX_RANGE_DAYS = 400;
 
@@ -88,7 +93,7 @@ export async function getDaysFor(ids: number[], from: string, to: string): Promi
     const { rows } = await pool.query<CachedRow>(
       `SELECT ad.employee_id, to_char(ad.date, 'YYYY-MM-DD') AS d, ad.status, ad.early_leave, ad.late_minutes, ad.early_minutes,
               ad.first_in, ad.last_out, ad.worked_minutes, ad.punch_count, ad.leave, ad.holiday, ad.timing, ad.corrected,
-              (ad.date < $4::date OR ad.computed_at > now() - ($5::double precision * interval '1 millisecond')) AS fresh,
+              (${SETTLED} OR ad.computed_at > now() - ($5::double precision * interval '1 millisecond')) AS fresh,
               e.emp_code, e.name, w.name AS wing_name, s.name AS section_name, e.designation,
               EXISTS (SELECT 1 FROM user_photos p WHERE p.pin = e.emp_code AND COALESCE(p.content, '') <> '') AS has_photo
        FROM attendance_days ad JOIN employees e ON e.id = ad.employee_id
@@ -248,7 +253,7 @@ export async function ensureCached(ids: number[], from: string, to: string): Pro
     `SELECT i.id AS employee_id, to_char(g, 'YYYY-MM-DD') AS d
      FROM unnest($1::int[]) AS i(id) CROSS JOIN generate_series($2::date, $3::date, interval '1 day') g
      WHERE NOT EXISTS (SELECT 1 FROM attendance_days ad WHERE ad.employee_id = i.id AND ad.date = g::date
-                         AND (ad.date < $4::date OR ad.computed_at > now() - ($5::double precision * interval '1 millisecond')))
+                         AND (${SETTLED} OR ad.computed_at > now() - ($5::double precision * interval '1 millisecond')))
         OR EXISTS (SELECT 1 FROM attendance_dirty q WHERE q.employee_id = i.id AND q.date = g::date)`,
     [ids, from, upto, today, TODAY_FRESH_MS],
   );

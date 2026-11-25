@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Copy, History, Sparkles } from 'lucide-react';
+import { Copy, History, Moon, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { WEEKDAYS, zTimingProfileInput } from '@nacta/shared';
 import type { TimingProfile, TimingProfileUpdate } from '@nacta/shared';
@@ -142,7 +142,7 @@ function ProfileForm({ profile, guided, onClose }: { profile: TimingProfile | nu
           <div className="flex items-end justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold tracking-tight">Working hours</h3>
-              <p className="text-xs text-muted-foreground">Set start and end for each day, or switch a day off.</p>
+              <p className="text-xs text-muted-foreground">Set start and end for each day, or switch a day off. For a night shift, set an end earlier than the start (e.g. 17:00 to 09:00).</p>
             </div>
             <Button type="button" size="sm" variant="secondary" onClick={copyMonday} disabled={!days[1]!.on}>
               <Copy aria-hidden="true" /> Copy Monday to weekdays
@@ -163,6 +163,11 @@ function ProfileForm({ profile, guided, onClose }: { profile: TimingProfile | nu
                       <Input type="time" mono aria-label={`${w.name} start`} value={d.start} onChange={(e) => setDay(dow, { start: e.target.value })} className="w-[7.5rem]" invalid={Boolean(errors[`day${dow}`])} />
                       <span className="text-muted-foreground" aria-hidden="true">to</span>
                       <Input type="time" mono aria-label={`${w.name} end`} value={d.end} onChange={(e) => setDay(dow, { end: e.target.value })} className="w-[7.5rem]" invalid={Boolean(errors[`day${dow}`])} />
+                      {d.end < d.start && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-info-subtle px-2 py-0.5 text-[11px] font-medium text-info-text" title="Night shift: ends the next morning and counts on the day it starts">
+                          <Moon className="size-3" aria-hidden="true" /> next day
+                        </span>
+                      )}
                     </div>
                   ) : (
                     <span className="text-xs text-muted-foreground">Day off</span>

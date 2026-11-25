@@ -1,13 +1,13 @@
 import * as React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarOff, FilePenLine, Fingerprint } from 'lucide-react';
-import type { AttendanceDay } from '@nacta/shared';
+import { isOvernight, type AttendanceDay } from '@nacta/shared';
 import { useAuth } from '../../lib/auth';
-import { parseYmd } from '../../lib/dates';
+import { addDaysYmd, parseYmd, splitPunch } from '../../lib/dates';
 import { listAttendance } from '../../lib/endpoints/attendance';
 import { listCorrections } from '../../lib/endpoints/rules';
 import { qk } from '../../lib/query-keys';
-import { explainDay, formatMinutes } from '../../lib/rules-ui';
+import { explainDay, formatMinutes, nightSplitTime } from '../../lib/rules-ui';
 import { relativeTime } from '../../lib/time';
 import { Button } from '../../components/ui/button';
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from '../../components/ui/sheet';
@@ -33,10 +33,20 @@ export function DayPanel({ employee, date, day, onClose, onMarkLeave, onCorrect 
   const shown = date ?? last.current?.date ?? null;
   const shownDay = date ? day : last.current?.day;
 
+  // A night shift (e.g. 17:00-09:00) runs into the next morning: list punches across both dates, from the point where
+  // the shift's day begins to the same point the next day (the server splits days the same way).
+  const night = isOvernight(shownDay?.timing);
+  const punchTo = shown && night ? addDaysYmd(shown, 1) : shown;
+  const split = night && shownDay?.timing ? nightSplitTime(shownDay.timing) : null;
   const punches = useQuery({
-    queryKey: qk.attendance.list({ employeeId: employee.id, from: shown ?? undefined, to: shown ?? undefined, page: 1, pageSize: 50, sort: 'punchTime', order: 'asc' }),
-    queryFn: ({ signal }) => listAttendance({ employeeId: employee.id, from: shown!, to: shown!, page: 1, pageSize: 50, sort: 'punchTime', order: 'asc' }, signal),
+    queryKey: qk.attendance.list({ employeeId: employee.id, from: shown ?? undefined, to: punchTo ?? undefined, page: 1, pageSize: 100, sort: 'punchTime', order: 'asc' }),
+    queryFn: ({ signal }) => listAttendance({ employeeId: employee.id, from: shown!, to: punchTo!, page: 1, pageSize: 100, sort: 'punchTime', order: 'asc' }, signal),
     enabled: date !== null,
+  });
+  const dayPunches = (punches.data?.items ?? []).filter((p) => {
+    if (!split || !shown) return true;
+    const { date: d, time } = splitPunch(p.punchTime);
+    return d === shown ? time >= split : time < split;
   });
   const fixes = useQuery({
     queryKey: qk.daily.corrections(employee.id, shown ?? '', shown ?? ''),
@@ -75,6 +85,7 @@ export function DayPanel({ employee, date, day, onClose, onMarkLeave, onCorrect 
               {shownDay.timing && (
                 <p className="text-xs text-muted-foreground">
                   Timing: {shownDay.timing.profileName}, {shownDay.timing.start}&ndash;{shownDay.timing.end}
+                  {night ? ' (night shift, ends the next morning)' : ''}
                 </p>
               )}
             </section>
@@ -90,11 +101,11 @@ export function DayPanel({ employee, date, day, onClose, onMarkLeave, onCorrect 
               <Skeleton className="h-16" />
             ) : punches.isError ? (
               <p className="text-[13px] text-danger-text">Punches could not be loaded.</p>
-            ) : punches.data.items.length === 0 ? (
+            ) : dayPunches.length === 0 ? (
               <p className="rounded-lg border border-dashed px-3 py-4 text-center text-[13px] text-muted-foreground">No punches on this day.</p>
             ) : (
               <ul className="divide-y rounded-lg border">
-                {punches.data.items.map((p) => (
+                {dayPunches.map((p) => (
                   <li key={p.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2">
                     <PunchTime punchTime={p.punchTime} />
                     <span className="flex items-center gap-2">

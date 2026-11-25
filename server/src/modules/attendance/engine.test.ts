@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeDay, type EngineEmployee, type EngineInput, type EngineLeave } from './engine';
+import { computeDay, dayStartMinutes, overnightAnchorMinutes, type EngineEmployee, type EngineInput, type EngineLeave } from './engine';
 import {
   dayKind,
   holidaysFor,
@@ -51,6 +51,47 @@ const leave = (part: EngineLeave['part'], extra: Partial<EngineLeave> = {}): Eng
   part,
   countsAsPresent: false,
   ...extra,
+});
+
+describe('engine: night shifts', () => {
+  const NIGHT: ResolvedTiming = { ...STD, profileName: 'Night', days: Array.from({ length: 7 }, () => ({ start: '17:00', end: '09:00' })) };
+  const night = (o: Partial<EngineInput> = {}) => run({ timing: NIGHT, ...o });
+
+  it('punches on the next date count past midnight', () => {
+    const d = night({ punches: ['16:50:00', `2026-11-19 09:10:00`] });
+    expect(d).toMatchObject({ status: 'present', firstIn: '16:50', lastOut: '09:10', workedMinutes: 980, earlyLeave: false });
+    const early = night({ punches: ['17:00:00', '2026-11-19 07:00:00'] });
+    expect(early).toMatchObject({ earlyLeave: true, earlyMinutes: 120 });
+  });
+
+  it('is still running the next morning and over two hours after its end', () => {
+    const at = (date: string, minutes: number) => night({ now: { date, minutes }, punches: ['17:00:00'] }).status;
+    expect(at(WED, 23 * 60)).toBe('present');
+    expect(at('2026-11-19', 8 * 60)).toBe('present');
+    expect(at('2026-11-19', 11 * 60 + 1)).toBe('incomplete');
+    expect(night({ now: { date: '2026-11-19', minutes: 10 * 60 } }).status).toBe('pending');
+    expect(night({ now: { date: '2026-11-19', minutes: 11 * 60 + 1 } }).status).toBe('absent');
+  });
+
+  it('a manual punch before the split (13:00) is the next morning', () => {
+    const d = night({ punches: ['17:00:00'], corrections: [{ id: 1, type: 'add_punch', time: '09:00', status: null }] });
+    expect(d).toMatchObject({ lastOut: '09:00', workedMinutes: 960, corrected: true });
+    const arrival = night({ punches: ['2026-11-19 09:00:00'], corrections: [{ id: 1, type: 'add_punch', time: '17:30', status: null }] });
+    expect(arrival).toMatchObject({ firstIn: '17:30', lastOut: '09:00', lateMinutes: 30 });
+  });
+
+  it('day boundaries: midnight normally, the anchor around night shifts', () => {
+    const day = { start: '09:00', end: '17:00' };
+    const nite = { start: '17:00', end: '09:00' };
+    expect(dayStartMinutes(day, day)).toBe(0);
+    expect(dayStartMinutes(null, null)).toBe(0);
+    expect(dayStartMinutes(nite, nite)).toBe(13 * 60);
+    expect(dayStartMinutes(nite, day)).toBe(13 * 60);
+    expect(dayStartMinutes(null, nite)).toBe(13 * 60); // weekend after a night: the Saturday-morning check-out stays with Friday
+    expect(dayStartMinutes(day, nite)).toBe(9 * 60); // a day shift right after a night shift
+    expect(dayStartMinutes({ start: '22:00', end: '06:00' }, null)).toBe(14 * 60);
+    expect(overnightAnchorMinutes(nite)).toBe(13 * 60);
+  });
 });
 
 describe('engine: punches on a working day', () => {

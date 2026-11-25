@@ -23,7 +23,9 @@ export function summarizeDays(days: Hours[]): string {
   });
   if (groups.length === 0) return 'No working days';
   const name = (i: number) => WEEKDAYS[WEEK_ORDER[i]!]!.short;
-  return groups.map((g) => `${g.from === g.to ? name(g.from) : `${name(g.from)}–${name(g.to)}`} ${g.h!.start}–${g.h!.end}`).join(', ');
+  return groups
+    .map((g) => `${g.from === g.to ? name(g.from) : `${name(g.from)}–${name(g.to)}`} ${g.h!.start}–${g.h!.end}${g.h!.end < g.h!.start ? ' (next day)' : ''}`)
+    .join(', ');
 }
 
 /** The seven day chips of a profile; off days are greyed. */
@@ -36,7 +38,7 @@ export function WeekStrip({ days }: { days: Hours[] }) {
           <li
             key={dow}
             className={cn('flex flex-col items-center rounded-md border px-1 py-1.5 text-center', h ? 'border-primary/25 bg-primary-subtle' : 'border-dashed bg-muted/40 text-muted-foreground/70')}
-            aria-label={`${WEEKDAYS[dow]!.name}: ${h ? `${h.start} to ${h.end}` : 'day off'}`}
+            aria-label={`${WEEKDAYS[dow]!.name}: ${h ? `${h.start} to ${h.end}${h.end < h.start ? ' the next day' : ''}` : 'day off'}`}
           >
             <span className={cn('text-[11px] font-semibold uppercase tracking-wide', h ? 'text-primary-text' : '')}>{WEEKDAYS[dow]!.short}</span>
             {h ? (
@@ -44,6 +46,7 @@ export function WeekStrip({ days }: { days: Hours[] }) {
                 {h.start}
                 <br />
                 {h.end}
+                {h.end < h.start && <sup className="ml-px text-[8px] text-info-text">+1</sup>}
               </span>
             ) : (
               <span className="mt-0.5 text-[10px] leading-tight">Off</span>
