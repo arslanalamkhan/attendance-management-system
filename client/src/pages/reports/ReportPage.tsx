@@ -2,7 +2,8 @@ import * as React from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Printer, UserSearch } from 'lucide-react';
-import { REPORT_TYPES, REPORT_TYPE_KEYS } from '@nacta/shared';
+import { REPORT_TYPES, REPORT_TYPE_KEYS, reportPermission } from '@nacta/shared';
+import { useAuth } from '../../lib/auth';
 import type { ReportType } from '@nacta/shared';
 import { getReport } from '../../lib/endpoints/reports';
 import { qk } from '../../lib/query-keys';
@@ -166,5 +167,25 @@ export default function ReportPage() {
       />
     );
   }
-  return <ReportView key={type} type={type as ReportType} />;
+  return <AllowedReport type={type as ReportType} />;
+}
+
+/** Each report is granted on its own: without reports.<type> the page explains instead of failing on a 403. */
+function AllowedReport({ type }: { type: ReportType }) {
+  const { can } = useAuth();
+  if (!can(reportPermission(type))) {
+    return (
+      <EmptyState
+        className="mt-10"
+        title="This report is not part of your role"
+        description={`Ask a Super Admin to add "${REPORT_TYPES[type].label}" to your role.`}
+        action={
+          <Button asChild>
+            <Link to="/reports">All reports</Link>
+          </Button>
+        }
+      />
+    );
+  }
+  return <ReportView key={type} type={type} />;
 }

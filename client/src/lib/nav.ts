@@ -1,4 +1,4 @@
-import type { Permission } from '@nacta/shared';
+import { REPORT_PERMISSIONS, type Permission } from '@nacta/shared';
 import {
   Building2,
   Cpu,
@@ -43,7 +43,8 @@ export interface NavGroup {
 export const NAV: NavGroup[] = [
   {
     label: 'Overview',
-    items: [{ label: 'Dashboard', to: '/', icon: LayoutDashboard, end: true, perm: ['dashboard.view'], keywords: ['home', 'overview', 'stats'] }],
+    // No permission: every role has a home page (the full dashboard with dashboard.view, otherwise the simple one).
+    items: [{ label: 'Dashboard', to: '/', icon: LayoutDashboard, end: true, keywords: ['home', 'overview', 'stats', 'today'] }],
   },
   {
     label: 'People',
@@ -62,7 +63,7 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'Reports',
-    items: [{ label: 'All reports', to: '/reports', icon: FileBarChart, perm: ['attendance.view'], keywords: ['report', 'export', 'excel', 'pdf', 'register', 'monthly', 'late comers', 'absentees', 'time card', 'summary', 'download'] }],
+    items: [{ label: 'All reports', to: '/reports', icon: FileBarChart, perm: REPORT_PERMISSIONS, keywords: ['report', 'export', 'excel', 'pdf', 'register', 'monthly', 'late comers', 'absentees', 'time card', 'summary', 'download'] }],
   },
   {
     label: 'Leave & timings',

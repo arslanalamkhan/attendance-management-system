@@ -11,7 +11,6 @@ export const PERMISSION_REQUIRES: Partial<Record<Permission, Permission[]>> = {
   'employees.biometrics': ['employees.view'],
   'employees.import': ['employees.view', 'employees.manage'],
   'wings.manage': ['employees.view'],
-  'attendance.export': ['attendance.view'],
   'attendance.correct': ['attendance.view'],
   'leave.manage': ['attendance.view', 'employees.view'],
   'holidays.manage': ['attendance.view'],

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import ExcelJS from 'exceljs';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { REPORT_TYPE_KEYS, zDashboard, zReportResult, type ReportType } from '@nacta/shared';
+import { REPORT_PERMISSIONS, REPORT_TYPE_KEYS, zDashboard, zReportResult, zTodaySummary, type ReportType } from '@nacta/shared';
 import { api, closeDb, createDevice, pool, resetDb, userClient, V1, type Client } from './helpers';
 import { addDays, todayLocal } from '../src/lib/dates';
 import { flushAudit } from '../src/modules/audit/service';
@@ -111,9 +111,9 @@ let viewer: Awaited<ReturnType<typeof userClient>>;
 let exporter: Awaited<ReturnType<typeof userClient>>;
 let corrector: Awaited<ReturnType<typeof userClient>>;
 const mkUsers = async (w: World) => {
-  viewer = await userClient({ permissions: ['attendance.view', 'dashboard.view'], wings: [w.ops] });
-  exporter = await userClient({ permissions: ['attendance.view', 'attendance.export'], wings: 'all' });
-  corrector = await userClient({ permissions: ['attendance.view', 'attendance.correct', 'audit.view', 'attendance.export'], wings: 'all' });
+  viewer = await userClient({ permissions: ['attendance.view', 'dashboard.view', ...REPORT_PERMISSIONS], wings: [w.ops] });
+  exporter = await userClient({ permissions: ['attendance.view', 'attendance.export', ...REPORT_PERMISSIONS], wings: 'all' });
+  corrector = await userClient({ permissions: ['attendance.view', 'attendance.correct', 'audit.view', 'attendance.export', ...REPORT_PERMISSIONS], wings: 'all' });
 };
 
 // ======================================================================================================================
@@ -131,7 +131,7 @@ describe('reports: contract and validation', () => {
     }
   });
 
-  it('needs attendance.view for the screen, attendance.export for files, dashboard.view for the dashboard', async () => {
+  it('each report needs its own permission; files also need attendance.export; dashboard.view for the dashboard', async () => {
     const w = await world();
     await mkUsers(w);
     const nobody = await userClient({ permissions: [] });
@@ -142,6 +142,18 @@ describe('reports: contract and validation', () => {
     expect((await exporter.get(`${V1}/dashboard`)).status).toBe(403);
     expect((await exporter.get(`${V1}/reports/daily/export?format=xlsx`)).status).toBe(200);
     expect((await rawGet('/reports/daily')).status).toBe(401);
+
+    // reports are granted one by one: the daily report does not open the absentees report
+    const dailyOnly = await userClient({ permissions: ['reports.daily', 'attendance.export'], wings: 'all' });
+    expect((await get(dailyOnly, 'daily')).status).toBe(200);
+    expect((await dailyOnly.get(`${V1}/reports/daily/export?format=xlsx`)).status).toBe(200);
+    const other = await get(dailyOnly, 'absentees');
+    expect(other.status).toBe(403);
+    expect(other.body.error.message).toContain('Absentees report');
+    expect((await dailyOnly.get(`${V1}/reports/absentees/export?format=xlsx`)).status).toBe(403);
+    // attendance.view alone no longer opens reports
+    const viewOnly = await userClient({ permissions: ['attendance.view'], wings: 'all' });
+    expect((await get(viewOnly, 'daily')).status).toBe(403);
   });
 
   it('400 VALIDATION_ERROR for missing or bad parameters, 404 for an unknown report', async () => {
@@ -705,7 +717,7 @@ describe('exports', () => {
 
   it('exports are wing-scoped too', async () => {
     const w = await world();
-    const limited = await userClient({ permissions: ['attendance.view', 'attendance.export'], wings: [w.ops] });
+    const limited = await userClient({ permissions: ['attendance.view', 'attendance.export', ...REPORT_PERMISSIONS], wings: [w.ops] });
     const res = await download(limited, 'daily', 'xlsx', `date=${D()}`);
     const text = (await rowsText(res.body)).join('|');
     expect(text).toContain('Ali Raza');
@@ -867,5 +879,89 @@ describe.runIf(process.env.NACTA_SAMPLE_DIR)('sample files', () => {
       fs.writeFileSync(path.join(dir, `fixture-${type}.xlsx`), await buildXlsx(data, gen));
       fs.writeFileSync(path.join(dir, `fixture-${type}.pdf`), await buildPdf(data, gen));
     }
+  });
+});
+
+describe('export attendance report', () => {
+  it('first in and last out per employee per day, with corrections, by wing or one person', async () => {
+    const w = await world();
+    await mkUsers(w);
+    // Bina forgot to punch out the day before D: a correction adds it
+    await punch('102', ago(4), '09:00');
+    const fix = await api.post(`${V1}/attendance/corrections`).send({ employeeId: w.bina.id, date: ago(4), type: 'add_punch', time: '17:30', reason: 'Forgot to punch out' });
+    expect(fix.status).toBe(201);
+
+    const { body, raw } = await result(api, 'attendance_export', `from=${ago(4)}&to=${D()}&wingId=${w.ops}`);
+    expect(body.columns.map((c) => c.key)).toEqual(['code', 'name', 'designation', 'wing', 'date', 'weekday', 'in', 'out', 'remark', 'corrected']);
+    // two people x two days, grouped by person
+    expect(raw.rows.map((r) => `${r.code} ${r.date}`)).toEqual([`101 ${ago(4)}`, `101 ${D()}`, `102 ${ago(4)}`, `102 ${D()}`]);
+    const row = (code: string, date: string) => raw.rows.find((r) => r.code === code && r.date === date) as Record<string, unknown>;
+    expect(row('101', D())).toMatchObject({ in: '09:05', out: '17:10', remark: null });
+    expect(row('102', ago(4))).toMatchObject({ in: '09:00', out: '17:30', corrected: 'Yes' }); // the corrected out time
+    expect(row('101', ago(4))).toMatchObject({ in: null, out: null, remark: 'Absent' });
+
+    // one person, across wings; the corrected marker is for the Super Admin only
+    const one = await result(exporter, 'attendance_export', `from=${ago(4)}&to=${D()}&employeeId=${w.bina.id}`);
+    expect(one.raw.rows.map((r) => r.code)).toEqual(['102', '102']);
+    expect(one.body.columns.map((c) => c.key)).not.toContain('corrected');
+    expect(one.raw.rows[0]).toMatchObject({ out: '17:30' });
+    expect(one.raw.rows[0]).not.toHaveProperty('corrected');
+    expect(one.body.subtitle).toContain('102 Bina Khan');
+
+    // a wing-limited user cannot pick someone outside their wings
+    expect((await get(viewer, 'attendance_export', `from=${ago(4)}&to=${D()}&employeeId=${w.cara.id}`)).status).toBe(404); // not revealed
+
+    const xlsx = await download(exporter, 'attendance_export', 'xlsx', `from=${ago(4)}&to=${D()}&wingId=${w.ops}`);
+    expect(xlsx.status).toBe(200);
+    expect(String(xlsx.headers['content-disposition'])).toContain('Attendance-Export');
+  });
+});
+
+describe('simple dashboard', () => {
+  it('any signed-in user gets today\'s four numbers for their own wings', async () => {
+    const w = await world();
+    await punch('101', todayLocal(), '09:01');
+    const none = await userClient({ permissions: [], wings: [w.ops] });
+    expect((await none.get(`${V1}/dashboard`)).status).toBe(403);
+    const res = await none.get(`${V1}/dashboard/today`);
+    expect(res.status).toBe(200);
+    const s = zTodaySummary.parse(res.body);
+    expect(s).toMatchObject({ date: todayLocal(), total: 2, present: 1, onLeave: 0, notRecorded: 1, dayOff: 0 });
+    const all = zTodaySummary.parse((await api.get(`${V1}/dashboard/today`)).body);
+    expect(all.total).toBe(4);
+    expect(all.present + all.onLeave + all.notRecorded + all.dayOff).toBe(all.total);
+    expect((await rawGet('/dashboard/today')).status).toBe(401);
+  });
+});
+
+describe('report-only roles', () => {
+  it('can fill in the report filters but never see personal employee data', async () => {
+    const w = await world();
+    await api.put(`${V1}/employees/${w.ali.id}`).send({ phone: '0300-1234567', address: 'House 1' });
+    const u = await userClient({ permissions: ['reports.attendance_export'], wings: 'all' });
+    expect((await u.get(`${V1}/wings`)).status).toBe(200);
+    const list = await u.get(`${V1}/employees?q=Ali`);
+    expect(list.status).toBe(200);
+    expect(list.body.items[0]).toMatchObject({ empCode: '101', name: 'Ali Raza', designation: 'Analyst', phone: null, address: null, cnic: null, devicePassword: null });
+    expect((await u.get(`${V1}/employees/${w.ali.id}`)).status).toBe(403); // the full profile stays employees.view
+    const full = await api.get(`${V1}/employees?q=Ali`);
+    expect(full.body.items[0]).toMatchObject({ phone: '0300-1234567' });
+  });
+});
+
+describe('migration 009', () => {
+  it('roles that could open the reports keep every report; others get none', async () => {
+    const viewerRole = await api.post(`${V1}/roles`).send({ name: 'Viewers', permissions: ['attendance.view'], allWings: true, wingIds: [] });
+    const otherRole = await api.post(`${V1}/roles`).send({ name: 'Devices only', permissions: ['devices.view'], allWings: true, wingIds: [] });
+    expect([viewerRole.status, otherRole.status]).toEqual([201, 201]);
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const sql = fs.readFileSync(path.join(__dirname, '..', 'db', 'migrations', '009_report_permissions.sql'), 'utf8');
+    await pool.query(sql);
+    await pool.query(sql); // idempotent
+    const perms = async (id: number) =>
+      (await pool.query<{ permission: string }>('SELECT permission FROM role_permissions WHERE role_id = $1 ORDER BY permission', [id])).rows.map((r) => r.permission);
+    expect(await perms(viewerRole.body.id)).toEqual(['attendance.view', ...[...REPORT_PERMISSIONS].sort()]);
+    expect(await perms(otherRole.body.id)).toEqual(['devices.view']);
   });
 });

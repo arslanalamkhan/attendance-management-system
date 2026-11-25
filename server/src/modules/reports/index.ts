@@ -1,6 +1,7 @@
 import { REPORT_TYPES, type ReportResult, type ReportType } from '@nacta/shared';
 import { validationError } from '../../lib/errors';
 import { buildAbsentees } from './absentees';
+import { buildAttendanceExport } from './attendanceExport';
 import { MAX_REPORT_ROWS, resolveParams, slug } from './common';
 import { buildDaily } from './daily';
 import { buildLateComers } from './lateComers';
@@ -26,6 +27,7 @@ export async function buildReport(type: ReportType, p: ReportParams, ctx: Report
     case 'time_card': data = await buildTimeCard(p, ctx); break;
     case 'leave': data = await buildLeave(p, ctx); break;
     case 'punch_log': data = await buildPunchLog(p, ctx, paged); break;
+    case 'attendance_export': data = await buildAttendanceExport(p, ctx); break;
   }
   if (data.total > MAX_REPORT_ROWS) {
     throw validationError('This report is too large', { to: `${data.total.toLocaleString('en-US')} rows; narrow the filters (at most ${MAX_REPORT_ROWS.toLocaleString('en-US')})` });

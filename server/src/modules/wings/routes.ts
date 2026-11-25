@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { zSectionInput, zWingInput } from '@nacta/shared';
+import { REPORT_PERMISSIONS, zSectionInput, zWingInput } from '@nacta/shared';
 import { asyncHandler, idParam } from '../../lib/http';
 import { parseBody } from '../../lib/validate';
 import { authOf, requirePermission } from '../../middleware/auth';
@@ -15,7 +15,7 @@ const WING_LABELS = { headName: 'head' };
 // Several screens need the wing list (filters, role editor), so reading is open to any of these.
 wingsRouter.get(
   '/',
-  requirePermission('employees.view', 'attendance.view', 'wings.manage', 'roles.manage'),
+  requirePermission('employees.view', 'attendance.view', 'wings.manage', 'roles.manage', ...REPORT_PERMISSIONS),
   asyncHandler(async (req, res) => {
     res.json(await service.list(authOf(req).scope));
   }),

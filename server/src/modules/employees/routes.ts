@@ -12,6 +12,7 @@ import {
   zPushInput,
   zStatusChangeInput,
   type AuditChange,
+  type Employee,
 } from '@nacta/shared';
 import { AppError } from '../../lib/errors';
 import { asyncHandler, idParam } from '../../lib/http';
@@ -69,16 +70,47 @@ const EMP_LABELS = {
 const maskedChanges = (changes: AuditChange[]): AuditChange[] =>
   changes.map((c) => (c.field.toLowerCase() === 'cnic' ? { ...c, before: typeof c.before === 'string' ? empRepo.maskCnic(c.before) : c.before, after: typeof c.after === 'string' ? empRepo.maskCnic(c.after) : c.after } : c));
 
+/** An employee row reduced to what the report filters' picker shows; every personal field is blanked. */
+function pickerOnly(e: Employee): Employee {
+  return {
+    ...e,
+    fatherName: null,
+    cnic: null,
+    gender: null,
+    bps: null,
+    employmentType: null,
+    statusReason: null,
+    joinDate: null,
+    leftDate: null,
+    cardNo: null,
+    devicePassword: null,
+    privilege: 0,
+    phone: null,
+    email: null,
+    emergencyContactName: null,
+    emergencyContactPhone: null,
+    address: null,
+    notes: null,
+    deviceCount: 0,
+    templates: { fp: 0, face: 0, bio: 0 },
+  };
+}
+
 const callerOf = (req: Request): service.Caller => {
   const a = authOf(req);
   return { scope: a.scope, canManage: a.permissions.has('employees.manage') };
 };
 
+// The list is also the employee picker of the report filters (code, name, wing), so the reports that filter by
+// person may read it. The full profile (GET /:id) stays employees.view.
 employeesRouter.get(
   '/',
-  requirePermission('employees.view'),
+  requirePermission('employees.view', 'reports.time_card', 'reports.punch_log', 'reports.attendance_export'),
   asyncHandler(async (req, res) => {
-    res.json(await service.list(parseQuery(zEmployeeListQuery, req.query), callerOf(req)));
+    const page = await service.list(parseQuery(zEmployeeListQuery, req.query), callerOf(req));
+    // Report-only callers get what a picker needs (code, name, wing, designation, photo) and nothing personal.
+    if (!authOf(req).permissions.has('employees.view')) page.items = page.items.map(pickerOnly);
+    res.json(page);
   }),
 );
 

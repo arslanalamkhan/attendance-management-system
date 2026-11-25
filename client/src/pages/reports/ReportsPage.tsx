@@ -1,20 +1,23 @@
 import { Link } from 'react-router-dom';
 import { ArrowUpRight } from 'lucide-react';
-import { REPORT_TYPES, REPORT_TYPE_KEYS } from '@nacta/shared';
+import { REPORT_TYPES, REPORT_TYPE_KEYS, reportPermission } from '@nacta/shared';
+import { useAuth } from '../../lib/auth';
 import { usePageMeta } from '../../hooks/use-page-meta';
 import { Badge } from '../../components/ui/badge';
 import { Card } from '../../components/ui/card';
 import { PageHeader } from '../../components/ui/page-header';
 import { paramNames, REPORT_ICON } from './report-meta';
 
-/** /reports: the eight reports as cards. */
+/** /reports: the reports this user's roles may open, as cards (each report is granted per role). */
 export default function ReportsPage() {
   usePageMeta({ title: 'Reports' });
+  const { can } = useAuth();
+  const allowed = REPORT_TYPE_KEYS.filter((key) => can(reportPermission(key)));
   return (
     <>
       <PageHeader title="Reports" description="Run an attendance report on screen, then download it as a branded Excel workbook or PDF." />
       <ul aria-label="Reports" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {REPORT_TYPE_KEYS.map((key) => {
+        {allowed.map((key) => {
           const r = REPORT_TYPES[key];
           const Icon = REPORT_ICON[key];
           return (

@@ -24,7 +24,7 @@ import {
   Clock3,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { REPORT_TYPES, REPORT_TYPE_KEYS } from '@nacta/shared';
+import { REPORT_TYPES, REPORT_TYPE_KEYS, reportPermission } from '@nacta/shared';
 import { REPORT_ICON } from '../../pages/reports/report-meta';
 import { DESIGN_ITEM, modKeyLabel, visibleNav } from '../../lib/nav';
 import { useAuth } from '../../lib/auth';
@@ -143,11 +143,11 @@ function CommandPalette() {
               })}
             </CommandGroup>
 
-            {can('attendance.view') && (
+            {REPORT_TYPE_KEYS.some((key) => can(reportPermission(key))) && (
               <>
                 <CommandSeparator />
                 <CommandGroup heading="Reports">
-                  {REPORT_TYPE_KEYS.map((key) => {
+                  {REPORT_TYPE_KEYS.filter((key) => can(reportPermission(key))).map((key) => {
                     const Icon = REPORT_ICON[key];
                     const to = `/reports/${key}`;
                     return (

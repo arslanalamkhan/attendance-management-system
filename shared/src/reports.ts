@@ -3,8 +3,9 @@ import { zDate, zIsoDateTime } from './common';
 
 // =====================================================================================
 // Phase G: dashboard, reports and exports.
-// Every report is wing-scoped like the rest of the API. Viewing needs attendance.view; downloading needs
-// attendance.export and is audited as attendance.export (type, filters, format, row count).
+// Every report is wing-scoped like the rest of the API. Opening a report needs its own permission
+// (reports.<type>, granted per role); downloading it needs that plus attendance.export, and is audited as
+// attendance.export (type, filters, format, row count).
 // The "corrected" marker is NEVER shown to anyone but the Super Admin (Phase F decision) - on screen or in files.
 // Leave is always shown with its type, e.g. "On leave | CL Casual".
 // =====================================================================================
@@ -50,9 +51,16 @@ export const REPORT_TYPES = {
     description: 'Raw punches from the terminals with time, method and device.',
     params: ['from', 'to', 'wingId', 'deviceId', 'employeeId'] as const,
   },
+  attendance_export: {
+    label: 'Export attendance',
+    description: 'First in and last out of every employee for each day of a period, for a wing or one person. Corrections are included.',
+    params: ['from', 'to', 'wingId', 'sectionId', 'employeeId'] as const,
+  },
 } as const;
 export type ReportType = keyof typeof REPORT_TYPES;
 export const REPORT_TYPE_KEYS = Object.keys(REPORT_TYPES) as ReportType[];
+/** The permission that opens one report (each report is granted to roles separately). */
+export const reportPermission = <T extends ReportType>(type: T) => `reports.${type}` as const;
 export const zReportType = z.enum(REPORT_TYPE_KEYS as [ReportType, ...ReportType[]]);
 
 /** Union of all report parameters; each report uses the subset in REPORT_TYPES[type].params. */
@@ -128,6 +136,26 @@ export type ReportResult = z.infer<typeof zReportResult>;
 export const EXPORT_FORMATS = ['xlsx', 'pdf'] as const;
 export const zExportFormat = z.enum(EXPORT_FORMATS);
 export type ExportFormat = z.infer<typeof zExportFormat>;
+
+// ---------- Simple dashboard ----------
+/**
+ * GET /dashboard/today: four headline numbers for today, for any signed-in user (limited to the wings of their
+ * roles). Shown on the home page to roles without dashboard.view.
+ */
+export const zTodaySummary = z.object({
+  date: z.string(),
+  /** Active employees in scope. */
+  total: z.number().int(),
+  /** Punched in today: present, late, half day or a missing punch. */
+  present: z.number().int(),
+  /** On leave for the whole day. */
+  onLeave: z.number().int(),
+  /** No punch and no leave yet (absent once the day is over). */
+  notRecorded: z.number().int(),
+  /** Holiday or weekend for them today. */
+  dayOff: z.number().int(),
+});
+export type TodaySummary = z.infer<typeof zTodaySummary>;
 
 // ---------- Dashboard ----------
 export const zDashboard = z.object({

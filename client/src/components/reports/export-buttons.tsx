@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { ChevronDown, Download, FileSpreadsheet, FileText } from 'lucide-react';
-import type { ExportFormat, ReportParams, ReportType } from '@nacta/shared';
+import { reportPermission, type ExportFormat, type ReportParams, type ReportType } from '@nacta/shared';
 import { useApiMutation } from '../../lib/api';
 import { downloadReport } from '../../lib/endpoints/reports';
 import { exportFileName } from '../../lib/report-ui';
@@ -9,7 +9,7 @@ import { Button } from '../ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '../ui/dropdown-menu';
 import { Tooltip } from '../ui/tooltip';
 
-const NO_PERMISSION = "You don't have permission to download exports";
+const NO_PERMISSION = "Your role cannot download this report (needs Download reports and this report)";
 
 /** Download a report as xlsx or pdf with the given parameters. Success shows the saved file name in a toast. */
 export function useReportExport(type: ReportType, params: ReportParams) {
@@ -41,11 +41,11 @@ export interface ExportControlProps {
   size?: 'sm' | 'md';
 }
 
-/** "Download Excel" and "Download PDF", gated by attendance.export. */
+/** "Download Excel" and "Download PDF", gated by attendance.export and the report's own permission. */
 export function ReportExportButtons({ type, params, blocked, size = 'md' }: ExportControlProps) {
   const { can } = useAuth();
   const { run, busy } = useReportExport(type, params);
-  const allowed = can('attendance.export');
+  const allowed = can('attendance.export') && can(reportPermission(type));
   const buttons = (
     <>
       <Button variant="secondary" size={size} disabled={!allowed || Boolean(blocked) || busy !== null} loading={busy === 'xlsx'} onClick={() => run('xlsx')}>
@@ -67,11 +67,11 @@ export function ReportExportButtons({ type, params, blocked, size = 'md' }: Expo
   );
 }
 
-/** One "Export" button with an Excel / PDF menu, gated by attendance.export (list pages and the time card). */
+/** One "Export" button with an Excel / PDF menu, gated by attendance.export and the report's permission (list pages and the time card). */
 export function ExportMenu({ type, params, blocked, size = 'md', label = 'Export', note }: ExportControlProps & { label?: string; note?: string }) {
   const { can } = useAuth();
   const { run, busy } = useReportExport(type, params);
-  const allowed = can('attendance.export');
+  const allowed = can('attendance.export') && can(reportPermission(type));
   const trigger = (
     <Button variant="secondary" size={size} disabled={!allowed || Boolean(blocked)} loading={busy !== null} aria-label={busy ? 'Preparing the export' : label}>
       {busy === null && <Download aria-hidden="true" />}

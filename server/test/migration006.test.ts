@@ -35,7 +35,7 @@ describe('migration 006: departments become wings', () => {
       await pool.query(`INSERT INTO role_permissions (role_id, permission) VALUES ($1, 'employees.view')`, [(viewer.rows[0] as { id: number }).id]);
 
       const applied = await runMigrations(pool, () => {});
-      expect(applied).toEqual(['006_wings_employees.sql', '007_biometrics.sql', '008_attendance_rules.sql']);
+      expect(applied).toEqual(['006_wings_employees.sql', '007_biometrics.sql', '008_attendance_rules.sql', '009_report_permissions.sql']);
       // 007: roles that could manage employees now also hold employees.biometrics; others do not
       const bioRoles = await pool.query<{ name: string }>(
         `SELECT r.name FROM role_permissions p JOIN roles r ON r.id = p.role_id WHERE p.permission = 'employees.biometrics' ORDER BY r.name`,

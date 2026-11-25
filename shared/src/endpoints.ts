@@ -63,6 +63,7 @@ export const endpoints = {
   auditViews: () => `/audit/views`, //                         POST PageViewInput -> 204
 
   // ---- Dashboard & reports (Phase G) ----
+  dashboardToday: () => `/dashboard/today`, //                 GET  -> TodaySummary (any signed-in user, own wings)
   dashboard: () => `/dashboard`, //                            GET  -> Dashboard (dashboard.view)
   report: (type: string) => `/reports/${type}`, //             GET  ReportParams -> ReportResult (attendance.view)
   reportExport: (type: string) => `/reports/${type}/export`, // GET  ?format=xlsx|pdf&ReportParams -> file (attendance.export, audited)

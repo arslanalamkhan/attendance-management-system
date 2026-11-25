@@ -1,4 +1,4 @@
-import { Building2, CalendarDays, CalendarOff, Clock3, Fingerprint, IdCard, Table2, UserX, type LucideIcon } from 'lucide-react';
+import { Building2, CalendarDays, CalendarOff, Clock3, Fingerprint, IdCard, LogIn, Table2, UserX, type LucideIcon } from 'lucide-react';
 import type { ReportType } from '@nacta/shared';
 import type { ReportParamKey } from '../../lib/report-ui';
 
@@ -11,6 +11,7 @@ export const REPORT_ICON: Record<ReportType, LucideIcon> = {
   time_card: IdCard,
   leave: CalendarOff,
   punch_log: Fingerprint,
+  attendance_export: LogIn,
 };
 
 /** Short names of the inputs a report needs, for the gallery cards. */

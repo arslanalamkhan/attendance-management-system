@@ -288,7 +288,7 @@ const TYPE_FIELDS = ['name', 'code', 'color', 'countsAsPresent', 'isActive'] as 
 
 leaveTypesRouter.get(
   '/',
-  requirePermission('attendance.view', 'leave.manage', 'leave.configure'),
+  requirePermission('attendance.view', 'leave.manage', 'leave.configure', 'reports.leave'),
   asyncHandler(async (_req, res) => {
     res.json(await leave.listTypes());
   }),

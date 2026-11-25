@@ -4,7 +4,7 @@
  * so a number on the dashboard matches what the Daily page and the reports show. Never part of a production bundle.
  * Demo hook: open with ?mockNoDashboard=1 to see the dashboard's fallback to the basic overview.
  */
-import { DAY_STATUS_CODE, DAY_STATUS_LABEL, DAY_STATUSES, REPORT_TYPES, REPORT_TYPE_KEYS, zReportParams } from '@nacta/shared';
+import { DAY_STATUS_CODE, DAY_STATUS_LABEL, DAY_STATUSES, REPORT_TYPES, REPORT_TYPE_KEYS, reportPermission, zReportParams } from '@nacta/shared';
 import type { AttendanceDay, Dashboard, DayStatus, Permission, ReportColumn, ReportResult, ReportType, StatusCell } from '@nacta/shared';
 import { addDaysYmd, endOfMonthYmd, formatDate, parseYmd, todayYmd } from '../lib/dates';
 import { MOCK_DEVICES } from './audit-mock-data';
@@ -553,6 +553,7 @@ export function createReportsRoutes(ctx: ReportsMockContext): [RegExp, Handler][
     time_card: timeCard,
     leave: leaveReport,
     punch_log: punchLog,
+    attendance_export: daily,
   };
 
   const isType = (t: string): t is ReportType => (REPORT_TYPE_KEYS as string[]).includes(t);
@@ -571,6 +572,7 @@ export function createReportsRoutes(ctx: ReportsMockContext): [RegExp, Handler][
   }
 
   return [
+    [/^\/dashboard\/today$/, () => json(200, { date: todayYmd(), total: 254, present: 198, onLeave: 14, notRecorded: 42, dayOff: 0 })],
     [/^\/dashboard$/, () => {
       // ?mockNoDashboard=1 behaves like a server that does not have /dashboard yet (the page falls back to /overview).
       if (new URLSearchParams(location.search).get('mockNoDashboard') === '1') return err(404, 'NOT_FOUND', 'Not found');
@@ -578,9 +580,9 @@ export function createReportsRoutes(ctx: ReportsMockContext): [RegExp, Handler][
     }],
 
     [/^\/reports\/([a-z_]+)\/export$/, async ({ params, query }) => {
-      if (!ctx.can('attendance.export')) return forbidden();
       const type = params[0]!;
       if (!isType(type)) return err(404, 'NOT_FOUND', 'Unknown report');
+      if (!ctx.can('attendance.export') || !ctx.can(reportPermission(type))) return forbidden();
       const bad = validate(type, query);
       if (bad) return bad;
       const format = query.get('format') === 'pdf' ? 'pdf' : 'xlsx';
@@ -597,9 +599,9 @@ export function createReportsRoutes(ctx: ReportsMockContext): [RegExp, Handler][
     }],
 
     [/^\/reports\/([a-z_]+)$/, ({ params, query }) => {
-      if (!ctx.can('attendance.view')) return forbidden();
       const type = params[0]!;
       if (!isType(type)) return err(404, 'NOT_FOUND', 'Unknown report');
+      if (!ctx.can(reportPermission(type))) return forbidden();
       const bad = validate(type, query);
       if (bad) return bad;
       const built = BUILDERS[type](query);

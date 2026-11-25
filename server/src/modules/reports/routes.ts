@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { REPORT_TYPES, zExportFormat, type ReportType } from '@nacta/shared';
+import { REPORT_PERMISSIONS, REPORT_TYPES, reportPermission, zExportFormat, type ReportType } from '@nacta/shared';
 import { notFound, validationError } from '../../lib/errors';
 import { asyncHandler } from '../../lib/http';
 import { parseQuery } from '../../lib/validate';
-import { authOf, requirePermission } from '../../middleware/auth';
+import { assertPermission, authOf, requirePermission } from '../../middleware/auth';
 import { audit } from '../audit/service';
 import { MAX_PDF_ROWS } from './common';
 import { buildReport, exportFileName, isReportType, resolveParams, toResult } from './index';
@@ -19,6 +19,9 @@ const typeOf = (raw: string | undefined): ReportType => {
   return raw;
 };
 
+// Every report is granted on its own (reports.<type>); the routes below first let anyone holding any report in.
+const anyReport = requirePermission(...REPORT_PERMISSIONS);
+
 /** The filters an export was run with, for the audit trail (only the parameters this report uses). */
 function auditedFilters(type: ReportType, p: ReportParams): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -32,9 +35,10 @@ function auditedFilters(type: ReportType, p: ReportParams): Record<string, unkno
 
 reportsRouter.get(
   '/:type',
-  requirePermission('attendance.view'),
+  anyReport,
   asyncHandler(async (req, res) => {
     const type = typeOf(req.params.type);
+    assertPermission(req, reportPermission(type));
     const p = resolveParams(type, req.query);
     const a = authOf(req);
     const ctx: ReportContext = { scope: a.scope, isSuperAdmin: a.user.isSuperAdmin };
@@ -47,9 +51,11 @@ const zExportQuery = z.object({ format: zExportFormat });
 
 reportsRouter.get(
   '/:type/export',
-  requirePermission('attendance.export'),
+  anyReport,
   asyncHandler(async (req, res) => {
     const type = typeOf(req.params.type);
+    assertPermission(req, reportPermission(type));
+    assertPermission(req, 'attendance.export');
     const { format } = parseQuery(zExportQuery, req.query);
     const p = resolveParams(type, req.query);
     const a = authOf(req);

@@ -28,7 +28,18 @@ export const PERMISSIONS = {
   'holidays.manage': { module: 'Leave & timings', label: 'Manage holidays', description: 'Maintain the holiday calendar and special working days.' },
   'timings.manage': { module: 'Leave & timings', label: 'Manage office timings', description: 'Set office hours, grace periods and Ramadan timings, and assign them to wings or employees.' },
 
-  'attendance.export': { module: 'Attendance', label: 'Export attendance', description: 'Download attendance as Excel or PDF. Every export is logged.' },
+  'attendance.export': { module: 'Reports', label: 'Download reports', description: 'Download the reports this role can open as Excel or PDF (also the export buttons on attendance pages). Every download is logged.' },
+
+  // Reports: one key per report, so each report can be given to specific roles.
+  'reports.daily': { module: 'Reports', label: 'Daily attendance report', description: 'Every employee on one date: status, in/out, worked hours, late/early, leave.' },
+  'reports.monthly_register': { module: 'Reports', label: 'Monthly attendance register', description: 'Employees by days of a month with status codes and monthly totals.' },
+  'reports.late_comers': { module: 'Reports', label: 'Late comers report', description: 'Late arrivals in a period with minutes late.' },
+  'reports.absentees': { module: 'Reports', label: 'Absentees report', description: 'Unexplained absences (no punch, no leave) in a period.' },
+  'reports.wing_summary': { module: 'Reports', label: 'Wing summary report', description: 'Per wing: headcount, present, late, on leave, absent and rates.' },
+  'reports.time_card': { module: 'Reports', label: 'Individual time card', description: 'One employee, day by day, with totals.' },
+  'reports.leave': { module: 'Reports', label: 'Leave report', description: 'Leave taken in a period by type.' },
+  'reports.punch_log': { module: 'Reports', label: 'Device punch log', description: 'Raw punches from the terminals.' },
+  'reports.attendance_export': { module: 'Reports', label: 'Export attendance report', description: 'First in and last out per employee per day for a period, by wing or for one person (corrections included).' },
 
   // Devices
   'devices.view': { module: 'Devices', label: 'View devices', description: 'See terminals, their status and the users stored on them.' },
@@ -49,7 +60,10 @@ export const PERMISSION_KEYS = Object.keys(PERMISSIONS) as Permission[];
 export const zPermission = z.enum(PERMISSION_KEYS as [Permission, ...Permission[]]);
 
 /** Module display order for the permission matrix. */
-export const PERMISSION_MODULES = ['Overview', 'People', 'Attendance', 'Leave & timings', 'Devices', 'Administration'] as const;
+export const PERMISSION_MODULES = ['Overview', 'People', 'Attendance', 'Leave & timings', 'Reports', 'Devices', 'Administration'] as const;
+
+/** Every per-report key (reports.<type>). Holding any of them opens the Reports section. */
+export const REPORT_PERMISSIONS = PERMISSION_KEYS.filter((k) => k.startsWith('reports.')) as Extract<Permission, `reports.${string}`>[];
 
 // ---------- Password policy ----------
 export const PASSWORD_MIN_LENGTH = 12;

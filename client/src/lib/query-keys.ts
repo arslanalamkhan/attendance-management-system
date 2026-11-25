@@ -17,6 +17,7 @@ export const qk = {
   health: () => ['v1', 'health'] as const,
   overview: () => ['v1', 'overview'] as const,
   dashboard: () => ['v1', 'dashboard'] as const,
+  dashboardToday: () => ['v1', 'dashboard', 'today'] as const,
   reports: {
     all: ['v1', 'reports'] as const,
     run: (type: string, q?: object) => ['v1', 'reports', type, q ?? {}] as const,

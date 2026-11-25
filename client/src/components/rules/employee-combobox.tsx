@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Check, ChevronsUpDown, X } from 'lucide-react';
 import { getEmployee, listEmployees } from '../../lib/endpoints/employees';
 import { qk } from '../../lib/query-keys';
+import { useAuth } from '../../lib/auth';
 import { cn } from '../../lib/utils';
 import { useDebouncedValue } from '../../hooks/use-debounced-value';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../ui/command';
@@ -37,14 +38,17 @@ export function EmployeeCombobox({ value, onChange, placeholder = 'Choose an emp
     enabled: open,
     staleTime: 30_000,
   });
-  // The chosen person, even when they are not in the current search results (e.g. opened from a link).
+  // The chosen person, even when they are not in the current search results (e.g. opened from a link). The full
+  // profile needs employees.view; report-only roles fall back to the row they picked from the list.
+  const { can } = useAuth();
+  const [picked, setPicked] = React.useState<{ id: number; name: string; empCode: string; hasPhoto: boolean } | null>(null);
   const chosen = useQuery({
     queryKey: qk.employees.detail(value ?? 0),
     queryFn: ({ signal }) => getEmployee(value as number, signal),
-    enabled: value !== null,
+    enabled: value !== null && can('employees.view'),
     staleTime: 60_000,
   });
-  const selected = value !== null ? chosen.data : undefined;
+  const selected = value === null ? undefined : (chosen.data ?? (picked?.id === value ? picked : undefined));
 
   return (
     <Popover
@@ -113,6 +117,7 @@ export function EmployeeCombobox({ value, onChange, placeholder = 'Choose an emp
                       key={e.id}
                       value={String(e.id)}
                       onSelect={() => {
+                        setPicked({ id: e.id, name: e.name, empCode: e.empCode, hasPhoto: e.hasPhoto });
                         onChange(e.id === value && clearable ? null : e.id);
                         setOpen(false);
                       }}

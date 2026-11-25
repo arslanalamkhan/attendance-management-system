@@ -1,26 +1,23 @@
 import { lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
-import type { Permission } from '@nacta/shared';
-import { Compass } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { REPORT_PERMISSIONS, type Permission } from '@nacta/shared';
 import { AuthLoadError, AuthLoader } from './components/auth/auth-loader';
 import { IdleTimeout } from './components/auth/idle-timeout';
 import { RequirePermission } from './components/auth/require-permission';
 import { AppShell } from './components/layout/app-shell';
-import { Button } from './components/ui/button';
-import { EmptyState } from './components/ui/empty-state';
 import { Skeleton } from './components/ui/skeleton';
 import { Toaster } from './components/ui/toaster';
 import { TooltipProvider } from './components/ui/tooltip';
 import { AuthProvider, useAuth } from './lib/auth';
-import { NAV, firstAccessiblePath } from './lib/nav';
+import { NAV } from './lib/nav';
 import ComingSoonPage from './pages/ComingSoonPage';
 import NotFoundPage from './pages/NotFoundPage';
 import ForcedPasswordChangePage from './pages/auth/ForcedPasswordChangePage';
 import LoginPage, { safeNext } from './pages/auth/LoginPage';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const SimpleDashboard = lazy(() => import('./pages/dashboard/SimpleDashboard'));
 const DesignPage = lazy(() => import('./pages/DesignPage'));
 const EmployeesPage = lazy(() => import('./pages/employees/EmployeesPage'));
 const EmployeeProfilePage = lazy(() => import('./pages/employees/EmployeeProfilePage'));
@@ -68,25 +65,11 @@ function page(any: Permission[] | null, node: ReactNode) {
   return any ? <RequirePermission any={any}>{inner}</RequirePermission> : inner;
 }
 
-/** "/" shows the dashboard, or sends users without dashboard.view to the first page they can open. */
+/** "/" shows the full dashboard, or the simple one (today's four numbers) to roles without dashboard.view. */
 function HomeRoute() {
   const { can } = useAuth();
   if (can('dashboard.view')) return page(['dashboard.view'], <DashboardPage />);
-  const first = firstAccessiblePath(can);
-  if (first && first !== '/') return <Navigate to={first} replace />;
-  return (
-    <EmptyState
-      className="mt-10"
-      icon={<Compass />}
-      title="No access has been assigned yet"
-      description="Your account is active but its roles do not include any pages. Ask a Super Admin to update your role."
-      action={
-        <Button asChild variant="secondary">
-          <Link to="/account">Open my account</Link>
-        </Button>
-      }
-    />
-  );
+  return page(null, <SimpleDashboard />);
 }
 
 function AppRoutes() {
@@ -105,8 +88,8 @@ function AppRoutes() {
         <Route path="attendance/daily" element={page(['attendance.view'], <DailyAttendancePage />)} />
         <Route path="attendance/leave" element={page(['leave.manage', 'attendance.view'], <LeavePage />)} />
 
-        <Route path="reports" element={page(['attendance.view'], <ReportsPage />)} />
-        <Route path="reports/:type" element={page(['attendance.view'], <ReportPage />)} />
+        <Route path="reports" element={page(REPORT_PERMISSIONS, <ReportsPage />)} />
+        <Route path="reports/:type" element={page(REPORT_PERMISSIONS, <ReportPage />)} />
 
         <Route path="settings/leave-types" element={page(['leave.configure'], <LeaveTypesPage />)} />
         <Route path="settings/holidays" element={page(['holidays.manage', 'attendance.view'], <HolidaysPage />)} />

@@ -17,7 +17,7 @@ interface Route {
 const ROUTES: Route[] = [
   { method: 'get', path: '/overview', any: ['dashboard.view'] },
 
-  { method: 'get', path: '/devices', any: ['devices.view', 'attendance.view', 'employees.push'] },
+  { method: 'get', path: '/devices', any: ['devices.view', 'attendance.view', 'employees.push', 'reports.punch_log'] },
   { method: 'post', path: '/devices', any: ['devices.manage'], body: { name: 'D', serialNumber: 'RB1' } },
   { method: 'get', path: '/devices/1', any: ['devices.view'] },
   { method: 'put', path: '/devices/1', any: ['devices.manage'], body: {} },
@@ -28,7 +28,7 @@ const ROUTES: Route[] = [
   { method: 'post', path: '/devices/1/users/fetch', any: ['devices.users'] },
   { method: 'delete', path: '/devices/1/users/5', any: ['devices.users'] },
 
-  { method: 'get', path: '/wings', any: ['employees.view', 'attendance.view', 'wings.manage', 'roles.manage'] },
+  { method: 'get', path: '/wings', any: ['employees.view', 'attendance.view', 'wings.manage', 'roles.manage', 'reports.daily', 'reports.monthly_register', 'reports.late_comers', 'reports.absentees', 'reports.wing_summary', 'reports.time_card', 'reports.leave', 'reports.punch_log', 'reports.attendance_export'] },
   { method: 'post', path: '/wings', any: ['wings.manage'], body: { name: 'W' } },
   { method: 'put', path: '/wings/1', any: ['wings.manage'], body: { name: 'W2' } },
   { method: 'delete', path: '/wings/1', any: ['wings.manage'] },
@@ -37,7 +37,10 @@ const ROUTES: Route[] = [
   { method: 'delete', path: '/sections/1', any: ['wings.manage'] },
   { method: 'get', path: '/employees/export.xlsx', any: ['employees.import'] },
 
-  { method: 'get', path: '/employees', any: ['employees.view'] },
+  { method: 'get', path: '/employees', any: ['employees.view', 'reports.time_card', 'reports.punch_log', 'reports.attendance_export'] },
+  // each report opens with its own permission only
+  { method: 'get', path: '/reports/daily', any: ['reports.daily'] },
+  { method: 'get', path: '/reports/attendance_export', any: ['reports.attendance_export'] },
   { method: 'post', path: '/employees', any: ['employees.manage'], body: { empCode: '1', name: 'E' } },
   { method: 'post', path: '/employees/push', any: ['employees.push'], body: { employeeIds: 'all' } },
   { method: 'get', path: '/employees/1', any: ['employees.view'] },

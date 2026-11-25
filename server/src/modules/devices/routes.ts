@@ -14,7 +14,7 @@ export const devicesRouter = Router();
 // "send to devices" dialog, so it is readable with any of these. Detail, commands and device users stay devices.view.
 devicesRouter.get(
   '/',
-  requirePermission('devices.view', 'attendance.view', 'employees.push'),
+  requirePermission('devices.view', 'attendance.view', 'employees.push', 'reports.punch_log'),
   asyncHandler(async (_req, res) => {
     res.json(await service.list());
   }),
