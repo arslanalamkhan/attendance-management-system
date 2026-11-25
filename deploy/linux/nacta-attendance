@@ -121,7 +121,9 @@ cmd_backup() {
 
 # Replace the database with a dump. Used by "restore" and by install.sh --restore.
 restore_dump() {
-  local file=$1 work=$file
+  # Two statements: on one "local" line $file would be expanded before it is assigned.
+  local file=$1
+  local work=$file
   if [[ $file == *.enc ]]; then
     [[ -r ${BACKUP_PASSPHRASE_FILE:-} ]] || die "$file is encrypted; set BACKUP_PASSPHRASE_FILE in $ENV_FILE"
     work=$(mktemp /tmp/nacta-restore.XXXXXX.dump)

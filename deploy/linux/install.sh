@@ -230,7 +230,9 @@ elif [[ ! -f /etc/nginx/ssl/nacta-attendance.crt ]]; then
   chmod 0600 /etc/nginx/ssl/nacta-attendance.key
   echo "created a self-signed certificate for $san (replace it with a NACTA CA certificate: see docs/DEPLOYMENT.md)"
 fi
-sed "s/__SERVER_NAME__/$SERVER_NAME${PRIMARY_IP:+ $PRIMARY_IP}/" "$APP_DIR/deploy/linux/nginx-nacta-attendance.conf" \
+NGINX_NAMES=$SERVER_NAME
+[[ -n $PRIMARY_IP && $PRIMARY_IP != "$SERVER_NAME" ]] && NGINX_NAMES="$NGINX_NAMES $PRIMARY_IP"
+sed "s/__SERVER_NAME__/$NGINX_NAMES/" "$APP_DIR/deploy/linux/nginx-nacta-attendance.conf" \
   >/etc/nginx/conf.d/nacta-attendance.conf
 [[ -L /etc/nginx/sites-enabled/default ]] && rm -f /etc/nginx/sites-enabled/default
 if command -v getenforce >/dev/null && [[ $(getenforce) != Disabled ]]; then
