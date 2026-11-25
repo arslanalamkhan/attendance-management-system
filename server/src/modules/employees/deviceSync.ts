@@ -122,12 +122,19 @@ export async function queueRemoval(
     // The SenseFace ignores the PIN filter and re-sends its whole biometric set; the delete waits until that upload
     // has finished (see takePending). Photos are NOT re-fetched: a USERPIC query makes it re-send every photo
     // (~90 MB), and photos already arrive with enrolment and the initial sync.
-    const fetch = await commandRepo.insertOne({ deviceId: d.id, command: commands.queryBiodataForPin(e.emp_code), employeeId: e.id }, db);
+    // Because every answer is the whole set, a biometric query that is still waiting to be sent to this device covers
+    // this person too: bulk removals (e.g. an Excel import marking hundreds as Left) share one upload per device
+    // instead of making the device re-send everything once per person.
+    let fetch = await commandRepo.pendingBiodataQuery(d.id, db);
+    if (fetch === null) {
+      fetch = await commandRepo.insertOne({ deviceId: d.id, command: commands.queryBiodataForPin(e.emp_code), employeeId: e.id }, db);
+      queued += 1;
+    }
     await commandRepo.insertOne(
       { deviceId: d.id, command: commands.deleteUserInfo(e.emp_code), employeeId: e.id, afterCommandId: fetch },
       db,
     );
-    queued += 2;
+    queued += 1;
     await db.query(
       `INSERT INTO employee_device_holds (employee_id, device_id, reason) VALUES ($1, $2, $3)
        ON CONFLICT (employee_id, device_id) DO UPDATE SET removed_at = now(), reason = EXCLUDED.reason`,

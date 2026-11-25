@@ -229,7 +229,7 @@ describe('status changes drive device access', () => {
       expect(poll3.text).toMatch(/^C:\d+:DATA DELETE USERINFO PIN=10$/);
     } else {
       // audit_logs-style append-only protection on adms_requests would stop us ageing rows; fall back to the timeout
-      await pool.query(`UPDATE device_commands SET created_at = now() - interval '1 hour' WHERE id = $1`, [q1!.id]);
+      await pool.query(`UPDATE device_commands SET created_at = now() - interval '1 hour', sent_at = now() - interval '1 hour' WHERE id = $1`, [q1!.id]);
       expect((await adms.get('/iclock/getrequest?SN=ST-A')).text).toMatch(/^C:\d+:DATA DELETE USERINFO PIN=10$/);
     }
 
@@ -240,6 +240,48 @@ describe('status changes drive device access', () => {
     expect(d.devices.find((x: { deviceId: number }) => x.deviceId === a.id)).toMatchObject({ onDevice: false, lastCommand: { command: 'DATA DELETE USERINFO', status: 'success' } });
     expect(d.deviceCount).toBe(1); // device B has not confirmed yet
     expect(d.deviceSync).toBe('pending');
+  });
+
+  it('bulk removal shares one biometric query per device; a sent query is not reused', async () => {
+    const dev = await createDevice('BULK-A', 'Gate');
+    const emps = [];
+    for (const code of ['41', '42', '43']) emps.push(await mkEmp({ empCode: code, name: `E${code}` }));
+    await holdOnDevice('BULK-A', '41', '42', '43', '44');
+    for (const e of emps) {
+      const r = await api.post(`${V1}/employees/${e.id}/status`).send({ status: 'left', force: true });
+      expect(r.status).toBe(200);
+    }
+    const list = await cmds(dev.id);
+    expect(list.map((c) => head(c.command))).toEqual([
+      'DATA QUERY BIODATA PIN=41',
+      'DATA DELETE USERINFO PIN=41',
+      'DATA DELETE USERINFO PIN=42',
+      'DATA DELETE USERINFO PIN=43',
+    ]);
+    expect(list.slice(1).every((c) => c.after_command_id === list[0]!.id)).toBe(true);
+
+    // the query goes out; a removal after that gets its own query (the device may already be past its upload)
+    const poll = await adms.get('/iclock/getrequest?SN=BULK-A');
+    expect(poll.text.split('\n').map((l) => l.replace(/^C:\d+:/, ''))).toEqual(['DATA QUERY BIODATA PIN=41']);
+    const e44 = await mkEmp({ empCode: '44', name: 'E44' });
+    expect((await api.post(`${V1}/employees/${e44.id}/status`).send({ status: 'left', force: true })).status).toBe(200);
+    const after = (await cmds(dev.id)).slice(4);
+    expect(after.map((c) => head(c.command))).toEqual(['DATA QUERY BIODATA PIN=44', 'DATA DELETE USERINFO PIN=44']);
+    expect(after[1]!.after_command_id).toBe(after[0]!.id);
+  });
+
+  it('a delete never goes out with its unsent query, however old the query is (device offline for hours)', async () => {
+    const dev = await createDevice('OFF-A', 'Gate');
+    const e = await mkEmp({ empCode: '51', name: 'E51' });
+    await holdOnDevice('OFF-A', '51');
+    expect((await api.post(`${V1}/employees/${e.id}/status`).send({ status: 'left', force: true })).status).toBe(200);
+    await pool.query(`UPDATE device_commands SET created_at = now() - interval '5 hours' WHERE device_id = $1`, [dev.id]);
+    const poll = await adms.get('/iclock/getrequest?SN=OFF-A');
+    expect(poll.text.split('\n').map((l) => l.replace(/^C:\d+:/, ''))).toEqual(['DATA QUERY BIODATA PIN=51']);
+    // sent but never answered: released once the timeout runs from the moment it was sent
+    expect((await adms.get('/iclock/getrequest?SN=OFF-A')).text).toBe('OK');
+    await pool.query(`UPDATE device_commands SET sent_at = now() - interval '1 hour' WHERE device_id = $1 AND status = 'sent'`, [dev.id]);
+    expect((await adms.get('/iclock/getrequest?SN=OFF-A')).text).toMatch(/^C:\d+:DATA DELETE USERINFO PIN=51$/);
   });
 
   it('409 NO_BIOMETRIC_BACKUP when a device reports more fingerprints than are stored; force overrides; face totals are ignored', async () => {
@@ -262,10 +304,12 @@ describe('status changes drive device access', () => {
 
     // someone with stored biometrics is not blocked, even though the totals do not add up
     expect((await api.post(`${V1}/employees/${e2.id}/status`).send({ status: 'disabled' })).status).toBe(200);
-    // force goes ahead (fetch + delete still queued)
+    // force goes ahead: the delete waits for the biometric query already queued for 21 (one upload covers both)
     const forced = await api.post(`${V1}/employees/${emp20.id}/status`).send({ status: 'disabled', force: true });
     expect(forced.status).toBe(200);
-    expect((await cmds(dev.id)).filter((c) => c.employee_id === emp20.id).map((c) => head(c.command))).toEqual(['DATA QUERY BIODATA PIN=20', 'DATA DELETE USERINFO PIN=20']);
+    const all = await cmds(dev.id);
+    expect(all.map((c) => head(c.command))).toEqual(['DATA QUERY BIODATA PIN=21', 'DATA DELETE USERINFO PIN=21', 'DATA DELETE USERINFO PIN=20']);
+    expect(all[2]!.after_command_id).toBe(all[0]!.id);
   });
 
   it('no check or commands when the employee is on no device or the device reports no totals', async () => {

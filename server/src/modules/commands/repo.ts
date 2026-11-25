@@ -77,14 +77,24 @@ export async function listForDevice(p: CommandListParams): Promise<{ items: Devi
  * DEPENDENCY_GRACE_SECONDS have passed, AND the device has gone quiet: no biometric upload (table=BIODATA, or any
  * full-size 64 KB upload chunk) from it for DEPENDENCY_GRACE_SECONDS. The SenseFace answers a biometric query with
  * its whole set over about a minute, so a fixed delay could delete a user before their backup arrived. It stops
- * waiting after DEPENDENCY_TIMEOUT_MINUTES so a lost command can never block a removal forever. A held command also
+ * waiting DEPENDENCY_TIMEOUT_MINUTES after the dependency was SENT, so an unanswered command can never block a
+ * removal forever; a dependency not sent yet always holds (a device that was offline for hours must still answer
+ * the query before the delete goes out, not receive both in the same poll). A held command also
  * holds back every later command of the same device (the device would otherwise run them out of order).
  */
 export const DEPENDENCY_GRACE_SECONDS = 30;
 export const DEPENDENCY_TIMEOUT_MINUTES = 15;
 export async function takePending(deviceId: number, max = 10): Promise<{ id: number; command: string }[]> {
   const { rows } = await pool.query<{ id: number; command: string }>(
-    `WITH cand AS (
+    `WITH quiet AS (
+       -- Evaluated once per poll (every candidate belongs to this device), not once per waiting command.
+       SELECT NOT EXISTS (
+         SELECT 1 FROM adms_requests r JOIN devices d ON d.serial_number = r.serial_number
+         WHERE d.id = $1 AND r.path ILIKE '%/cdata%'
+           AND r.created_at > now() - ($3::int * interval '1 second')
+           AND (r.query ILIKE '%table=BIODATA%' OR length(r.body) >= 60000)
+       ) AS ok
+     ), cand AS (
        SELECT c.id,
               (c.after_command_id IS NOT NULL
                AND EXISTS (SELECT 1 FROM device_commands p WHERE p.id = c.after_command_id)
@@ -92,12 +102,8 @@ export async function takePending(deviceId: number, max = 10): Promise<{ id: num
                  SELECT 1 FROM device_commands p
                  WHERE p.id = c.after_command_id
                    AND ((p.status IN ('success', 'failed') AND p.completed_at < now() - ($3::int * interval '1 second')
-                         AND NOT EXISTS (
-                           SELECT 1 FROM adms_requests r JOIN devices d ON d.serial_number = r.serial_number
-                           WHERE d.id = c.device_id AND r.path ILIKE '%/cdata%'
-                             AND r.created_at > now() - ($3::int * interval '1 second')
-                             AND (r.query ILIKE '%table=BIODATA%' OR length(r.body) >= 60000)))
-                        OR p.created_at < now() - ($4::int * interval '1 minute'))
+                         AND (SELECT ok FROM quiet))
+                        OR (p.status <> 'pending' AND COALESCE(p.sent_at, p.created_at) < now() - ($4::int * interval '1 minute')))
                )) AS held
        FROM device_commands c WHERE c.device_id = $1 AND c.status = 'pending'
      ), ok AS (
@@ -138,6 +144,20 @@ export async function insertMany(items: NewCommand[], client: Queryable = pool):
     n += rowCount ?? 0;
   }
   return n;
+}
+
+/**
+ * The id of a biometric query for this device that has not been sent yet (oldest first), or null. Once it is sent,
+ * the device uploads its whole set, so anyone still on the device at that moment is covered by it.
+ */
+export async function pendingBiodataQuery(deviceId: number, client: Queryable = pool): Promise<number | null> {
+  const { rows } = await client.query<{ id: number }>(
+    `SELECT id FROM device_commands
+     WHERE device_id = $1 AND status = 'pending' AND command LIKE 'DATA QUERY BIODATA%'
+     ORDER BY id LIMIT 1`,
+    [deviceId],
+  );
+  return rows[0]?.id ?? null;
 }
 
 /** The unfiltered biometric refresh. The SenseFace ignores a PIN filter and always sends its whole set. */
